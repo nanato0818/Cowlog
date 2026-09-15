@@ -1,0 +1,33 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+firmware/**/.vscode/
+
+# Flutter / Dart
+apps/mobile/.dart_tool/
+apps/mobile/.packages
+apps/mobile/build/
+apps/mobile/.flutter-plugins
+apps/mobile/.flutter-plugins-dependencies
+apps/mobile/.metadata
+apps/mobile/android/.gradle/
+apps/mobile/android/local.properties
+apps/mobile/ios/Pods/
+apps/mobile/ios/.symlinks/
+apps/mobile/macos/Pods/
+apps/mobile/linux/flutter/ephemeral/
+apps/mobile/macos/Flutter/ephemeral/
+apps/mobile/windows/flutter/ephemeral/
+
+# IDE and operating system files
+.DS_Store
+.idea/
+*.swp
+
+# Local secrets and generated test data
+.env
+.env.*
+!*.env.example
+firmware/**/include/secrets.h
+docs/test-results/raw/
