@@ -31,3 +31,12 @@ apps/mobile/windows/flutter/ephemeral/
 !*.env.example
 firmware/**/include/secrets.h
 docs/test-results/raw/
+
+# Cowlog API and Swift build outputs
+__pycache__/
+*.pyc
+*.sqlite3
+*.sqlite3-*
+.build/
+.swiftpm/xcode/package.xcworkspace/xcuserdata/
+*.xcuserstate

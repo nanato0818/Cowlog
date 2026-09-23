@@ -1,11 +1,10 @@
-# システム構成
+# システム構成（試作案）
 
 ```mermaid
 flowchart LR
-  Collar[首輪デバイス\nXIAO ESP32-S3\nL76K GNSS\nBMA400\nLoRa] -->|位置・活動量| Gateway[親機\nXIAO ESP32-S3 Plus\nLoRa]
-  Gateway -->|Wi-FiまたはUSB| Data[データ保存先]
-  Data --> App[Flutterアプリ]
-  App -->|観察記録・写真| Data
+  Collar[首輪\nGNSS・加速度・LoRa] -->|測定記録| Gateway[牧場の親機]
+  Gateway -->|HTTPS・まとめて再送可能| API[Python API・SQLite]
+  API -->|HTTPS| App[SwiftUI iOSアプリ]
 ```
 
 ## 各ディレクトリの役割
@@ -14,32 +13,16 @@ flowchart LR
 | --- | --- |
 | `firmware/collar/` | 首輪に搭載するマイコンのコード。GNSS、加速度センサー、LoRa送信を扱う。 |
 | `firmware/gateway/` | 親機のコード。LoRa受信、PC・サーバーとの通信を扱う。 |
-| `apps/mobile/` | Flutterアプリ。注意牛一覧、地図、個体記録、活動量グラフ、観察記録を実装する。 |
+| `apps/mobile/` | SwiftUIアプリ。優先一覧、最新位置、日別経路、活動量、欠測表示。 |
+| `apps/api/` | SQLite保存、重複排除、優先判定、HTTPS接続を前提とした読み取りAPI。 |
 | `hardware/electronics/` | 配線図、回路図、ピン割り当て、部品表。 |
 | `hardware/enclosure/` | Fusionの設計データ、STL、印刷条件。 |
 | `docs/test-results/` | 測位、通信距離、消費電力、装着試験の結果。 |
 
-## 実装順
+## 現在の状態
 
-1. `firmware/collar/` でGNSSとBMA400のデータを取得する。
-2. `firmware/gateway/` を作り、LoRa受信データをPCで確認する。
-3. 送受信するデータ形式を固定する。
-4. `apps/mobile/` にFlutterアプリを作り、まずはダミーデータで画面を作る。
-5. 親機の実データをアプリへ接続する。
+`apps/mobile/` と `apps/api/` にサンプルデータで動く試作を作成済みです。WindowsでPythonテストとSwiftの構文確認を行いました。Xcodeでのビルド、首輪→親機→APIの実データ接続、クラウド公開は未実施です。
 
 ## 共有するデータ形式
 
-```json
-{
-  "deviceId": "cow-001",
-  "timestamp": "2026-09-14T12:00:00+09:00",
-  "latitude": 34.331521,
-  "longitude": 133.168771,
-  "altitudeM": 7.3,
-  "satellites": 19,
-  "hdop": 0.8,
-  "activity": 0
-}
-```
-
-通信量を抑える実機版では、JSONではなく同じ項目をバイナリ形式で送るかを検討します。
+親機からAPIへ送る項目と重複排除の方法は[データ仕様案](data-contract.md)を参照してください。首輪と親機の間の形式はハード側との調整事項です。
