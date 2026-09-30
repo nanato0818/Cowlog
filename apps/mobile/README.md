@@ -1,7 +1,5 @@
-# iOSアプリ
+# モバイルアプリ
 
-`Cowlog.swiftpm` がSwiftUIのアプリ本体です。MacではXcodeで `Cowlog.swiftpm/Package.swift` を開き、iOSシミュレータまたは実機向けにビルドします。iPadではSwift Playgroundsで開けます。
+`cowlog_flutter/` が現在のFlutter版アプリです。iOSとAndroidの両方で動かせる構成で、優先一覧・地図・日別経路・活動量・接続設定を備えています。起動方法は[Flutter版のREADME](cowlog_flutter/README.md)を参照してください。
 
-初期設定はサンプルモードです。優先一覧・最新位置の地図・日別経路・活動量を試せます。実データにはHTTPSのAPI URLと閲覧用トークンを接続設定画面に入力します。トークンは端末のKeychainに保存します。
-
-WindowsではSwiftソースの構文確認まで実施済みで、Xcodeでのコンパイルと実機での操作確認はこれからです。
+`Cowlog.swiftpm/` は移行前のSwiftUI試作版です。必要に応じて画面やAPI仕様を比較するために残してあります。
