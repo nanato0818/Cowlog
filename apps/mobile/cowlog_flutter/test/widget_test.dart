@@ -9,6 +9,6 @@ void main() {
 
     expect(find.text('優先一覧'), findsOneWidget);
     expect(find.text('地図'), findsOneWidget);
-    expect(find.text('接続設定'), findsOneWidget);
+    expect(find.text('首輪・番号'), findsOneWidget);
   });
 }

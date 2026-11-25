@@ -15,7 +15,7 @@ def main() -> None:
     for cow_number in (1, 2):
         device = f"sample-{cow_number:02d}"
         register_cow(args.db, f"sample-cow-{cow_number}",
-                     f"サンプル牛 {cow_number}", device)
+                     f"サンプル牛 {cow_number}", device, now - timedelta(days=9))
         pending = []
         seq = 1
         for minutes_back in range(8 * 24 * 60, 0, -15):

@@ -1,0 +1,683 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cowlog GPSデバッグ</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root{
+    --bg:#f4f3f1; --panel:#ffffff; --ink:#1f1f21; --muted:#6b6b70; --line:#e7e5e1;
+    --accent:#d9473d; --accent-soft:#fbe9e7; --ok:#638975; --warn:#c69650; --bad:#9a9a9e; --ref:#2f6fd6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#141416; --panel:#1d1d20; --ink:#ececee; --muted:#9a9aa2; --line:#2e2e33; --accent-soft:#3a1f1c; }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN",system-ui,sans-serif}
+  .app{display:grid;grid-template-columns:380px 1fr;height:100%}
+  aside{background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;padding:16px 16px 40px}
+  h1{font-size:17px;margin:0 0 14px;letter-spacing:-.2px}
+  h2{font-size:12px;font-weight:700;color:var(--muted);margin:18px 0 8px;letter-spacing:.04em}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .row + .row{margin-top:8px}
+  button,select,input[type=date],input[type=text]{font:inherit;color:var(--ink);background:var(--panel);
+    border:1px solid var(--line);border-radius:10px;padding:7px 11px;min-height:36px}
+  button{cursor:pointer;font-weight:600}
+  button:hover{border-color:var(--muted)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.on{background:var(--ink);border-color:var(--ink);color:var(--panel)}
+  button:disabled{opacity:.45;cursor:default}
+  select{flex:1;min-width:0}
+  textarea{width:100%;min-height:84px;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);
+    background:var(--bg);border:1px dashed var(--line);border-radius:10px;padding:8px;resize:vertical}
+  textarea.drag{border-color:var(--accent);background:var(--accent-soft)}
+  label.check{display:flex;gap:6px;align-items:center;font-size:13px;cursor:pointer}
+  .note{font-size:12px;color:var(--muted);margin-top:6px}
+  .status{font-size:12px;margin-top:6px;min-height:18px}
+  .status.err{color:var(--accent)}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .stat{background:var(--bg);border-radius:10px;padding:8px 10px}
+  .stat b{display:block;font-size:17px;font-variant-numeric:tabular-nums}
+  .stat span{font-size:11px;color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+  th{position:sticky;top:0;background:var(--panel);text-align:left;color:var(--muted);font-weight:600;
+    border-bottom:1px solid var(--line);padding:5px 4px}
+  td{border-bottom:1px solid var(--line);padding:5px 4px;white-space:nowrap}
+  tr{cursor:pointer}
+  tr.sel td{background:var(--accent-soft)}
+  tr.bad td{color:var(--bad)}
+  .tablewrap{max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+  main{position:relative}
+  #map{position:absolute;inset:0}
+  .hud{position:absolute;left:12px;right:12px;bottom:12px;z-index:500;background:var(--panel);
+    border:1px solid var(--line);border-radius:14px;padding:10px 14px;box-shadow:0 8px 24px rgba(0,0,0,.14)}
+  .hud .info{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;font-variant-numeric:tabular-nums}
+  .hud .info b{font-weight:700}
+  .hud input[type=range]{width:100%;accent-color:var(--accent);margin:6px 0 0}
+  .cursor{position:absolute;top:12px;right:12px;z-index:500;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:6px 10px;font:12px ui-monospace,Menlo,monospace}
+  .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:8px}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+  @media (max-width:820px){
+    .app{grid-template-columns:1fr;grid-template-rows:auto 60vh}
+    aside{border-right:0;border-bottom:1px solid var(--line);max-height:none}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <h1>Cowlog GPSデバッグ</h1>
+
+    <div class="row">
+      <select id="siteSelect" aria-label="使用する地域"><option value="daigo">醍醐牧場</option><option value="innoshima">因島・中庄町4335周辺</option></select>
+      <button id="homeBtn">周辺へ戻る</button>
+    </div>
+
+    <h2>APIから読み込む</h2>
+    <div class="row">
+      <select id="cowSelect" disabled><option>API未接続</option></select>
+    </div>
+    <div class="row">
+      <input type="date" id="dateInput">
+      <button id="loadHistory" disabled>履歴を表示</button>
+      <button id="loadLatest" disabled>全頭の最新位置</button>
+    </div>
+    <div class="status" id="apiStatus"></div>
+
+    <h2>貼り付け・ファイル</h2>
+    <textarea id="pasteBox" placeholder="JSON（履歴・ダッシュボード・送信レコード・JSON Lines）、NMEA（GGA / RMC）、CSV（lat, lon 列）、首輪のシリアル出力を貼り付けるか、ファイルをここへドロップ"></textarea>
+    <div class="row">
+      <button id="parsePaste" class="primary">読み込む</button>
+      <label class="check"><input type="checkbox" id="appendMode">追加で読み込む</label>
+      <button id="clearAll">消去</button>
+      <button id="fileBtn">ファイルを選ぶ</button>
+      <input id="fileInput" type="file" accept=".json,.jsonl,.csv,.txt,.log,.nmea" multiple hidden>
+    </div>
+    <div class="status" id="parseStatus"></div>
+
+    <h2>首輪をUSBで直接つなぐ</h2>
+    <div class="row">
+      <button id="serialBtn">接続</button>
+      <select id="baud" style="flex:0 0 auto"><option>115200</option><option>9600</option><option>38400</option></select>
+      <label class="check"><input type="checkbox" id="follow" checked>最新に追従</label>
+    </div>
+    <div class="status" id="serialStatus"></div>
+
+    <h2>基準点（正解の位置）</h2>
+    <div class="row">
+      <button id="pickRef">地図をクリックして指定</button>
+      <button id="geoBtn">端末の現在地</button>
+      <button id="clearRef">解除</button>
+    </div>
+    <div class="row">
+      <input type="text" id="refInput" placeholder="33.50040, 132.67400" style="flex:1">
+      <button id="setRef">設定</button>
+    </div>
+    <div class="status" id="refStatus"></div>
+    <div class="stats" id="stats"></div>
+
+    <h2>表示</h2>
+    <div class="row">
+      <button id="baseAerial" class="on">航空写真</button>
+      <button id="baseOsm">道路地図</button>
+      <button id="fitBtn">全体を表示</button>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="showAcc" checked>精度円</label>
+      <label class="check"><input type="checkbox" id="showRoute" checked>経路</label>
+      <label class="check"><input type="checkbox" id="showBad" checked>除外点</label>
+      <label class="check"><input type="checkbox" id="showAreas" checked>区画</label>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>アプリで使う点</span>
+      <span><i style="background:var(--bad)"></i>アプリでは除外</span>
+      <span><i style="background:var(--ref)"></i>基準点・端末</span>
+      <span><i style="background:var(--warn)"></i>区画線</span>
+    </div>
+
+    <h2>点の一覧 <span id="countLabel"></span></h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>時刻</th><th>緯度</th><th>経度</th><th>精度</th><th>区画</th><th>判定</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </aside>
+
+  <main>
+    <div id="map"></div>
+    <div class="cursor" id="cursor">—</div>
+    <div class="hud" id="hud" hidden>
+      <div class="info" id="hudInfo"></div>
+      <input type="range" id="slider" min="0" max="0" value="0" step="1">
+    </div>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+"use strict";
+/* ===== アプリと同じ判定ルール（lib/models.dart・route_segments.dart と揃える） ===== */
+const RULES = { maxAccuracyM: 100, routeGapMs: 60 * 60 * 1000, staleMs: 15 * 60 * 1000 };
+// 因島は4335番地の周辺中心。4335-3の測量座標ではない。
+const SITES = {
+  daigo: { center: [33.5004, 132.6740], zoom: 16, boundaries: "boundaries.geojson" },
+  innoshima: { center: [34.33187762, 133.17151134], zoom: 17, boundaries: null },
+};
+const siteKey = new URLSearchParams(location.search).get("site") === "innoshima" ? "innoshima" : "daigo";
+const site = SITES[siteKey];
+
+const $ = (id) => document.getElementById(id);
+const state = { points: [], selected: -1, ref: null, areas: [], device: null };
+
+/* ===== 地図 ===== */
+$("siteSelect").value = siteKey;
+$("siteSelect").onchange = () => {
+  const url = new URL(location.href);
+  url.searchParams.set("site", $("siteSelect").value);
+  location.assign(url);
+};
+$("homeBtn").onclick = () => map.setView(site.center, site.zoom);
+$("refInput").placeholder = site.center.map((n) => n.toFixed(6)).join(", ");
+if (!site.boundaries) {
+  $("showAreas").checked = false;
+  $("showAreas").disabled = true;
+}
+const map = L.map("map", { zoomControl: true, preferCanvas: true }).setView(site.center, site.zoom);
+const bases = {
+  aerial: L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg",
+    { maxNativeZoom: 18, maxZoom: 21, attribution: "出典：国土地理院 全国最新写真（シームレス）" }),
+  osm: L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    { maxNativeZoom: 19, maxZoom: 21, attribution: "© OpenStreetMap contributors" }),
+};
+bases.aerial.addTo(map);
+const layers = {
+  areas: L.layerGroup().addTo(map), acc: L.layerGroup().addTo(map), route: L.layerGroup().addTo(map),
+  bad: L.layerGroup().addTo(map), good: L.layerGroup().addTo(map), sel: L.layerGroup().addTo(map),
+  ref: L.layerGroup().addTo(map), device: L.layerGroup().addTo(map),
+};
+L.control.scale({ imperial: false }).addTo(map);
+
+function setBase(name) {
+  for (const [k, layer] of Object.entries(bases)) {
+    if (k === name) layer.addTo(map); else map.removeLayer(layer);
+  }
+  $("baseAerial").classList.toggle("on", name === "aerial");
+  $("baseOsm").classList.toggle("on", name === "osm");
+}
+$("baseAerial").onclick = () => setBase("aerial");
+$("baseOsm").onclick = () => setBase("osm");
+
+/* ===== 区画 ===== */
+if (site.boundaries) fetch(site.boundaries).then((r) => r.ok ? r.json() : null).then((geo) => {
+  if (!geo) return;
+  for (const f of geo.features) {
+    if (f.geometry?.type !== "Polygon") continue;
+    const ring = f.geometry.coordinates[0].map(([lon, lat]) => [lat, lon]);
+    state.areas.push({ name: f.properties?.name || "区画", use: f.properties?.use || "", ring });
+    L.polygon(ring, { color: "#c69650", weight: 3, fill: false, interactive: false })
+      .bindTooltip(`${f.properties?.name || ""} ${f.properties?.use || ""}`, { sticky: true })
+      .addTo(layers.areas);
+  }
+  if (!state.points.length && layers.areas.getLayers().length) map.fitBounds(L.featureGroup(layers.areas.getLayers()).getBounds(), { padding: [30, 30] });
+  render();
+}).catch(() => {});
+
+function inRing([lat, lon], ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [yi, xi] = ring[i], [yj, xj] = ring[j];
+    if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function areaOf(lat, lon) {
+  if (!site.boundaries) return "区画未設定";
+  const hit = state.areas.find((a) => inRing([lat, lon], a.ring));
+  return hit ? hit.name.replace("区画", "") + (hit.use ? " " + hit.use : "") : "区画外";
+}
+
+/* ===== 距離 ===== */
+function meters(a, b) {
+  const R = 6371008.8, rad = Math.PI / 180;
+  const dLat = (b[0] - a[0]) * rad, dLon = (b[1] - a[1]) * rad;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * rad) * Math.cos(b[0] * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+function offsetNE(from, to) {
+  const rad = Math.PI / 180, R = 6371008.8;
+  return { n: (to[0] - from[0]) * rad * R, e: (to[1] - from[1]) * rad * R * Math.cos(from[0] * rad) };
+}
+
+/* ===== 点の正規化と判定 ===== */
+function makePoint(o) {
+  const lat = num(o.lat), lon = num(o.lon);
+  const p = {
+    t: o.t ? new Date(o.t) : null, lat, lon, acc: num(o.acc), hdop: num(o.hdop), sats: num(o.sats),
+    device: o.device || "", source: o.source || "", fix: o.fix,
+  };
+  if (p.t && isNaN(p.t)) p.t = null;
+  p.reason = judge(p);
+  p.valid = !p.reason;
+  p.area = Number.isFinite(lat) && Number.isFinite(lon) ? areaOf(lat, lon) : "—";
+  return p;
+}
+function num(v) { if (v === null || v === undefined || v === "") return null; const n = Number(v); return Number.isFinite(n) ? n : null; }
+function judge(p) {
+  if (p.lat === null || p.lon === null) return "座標なし";
+  if (p.lat < -90 || p.lat > 90 || p.lon < -180 || p.lon > 180) return "範囲外";
+  if (p.lat === 0 && p.lon === 0) return "0,0（未測位）";
+  if (p.fix === 0) return "測位なし";
+  if (p.acc !== null && (p.acc < 0 || p.acc > RULES.maxAccuracyM)) return `精度${Math.round(p.acc)}m>100m`;
+  return "";
+}
+
+/* ===== 読み込み（形式を自動判定） ===== */
+function parseAny(text) {
+  const out = [];
+  const trimmed = text.trim();
+  if (!trimmed) return out;
+  try {
+    const json = JSON.parse(trimmed);
+    collectJson(json, out);
+    if (out.length) return out;
+  } catch (_) {}
+  const lines = trimmed.split(/\r?\n/);
+  const csv = tryCsv(lines);
+  if (csv) return csv;
+  let pending = {}, rmcDate = null;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith("{")) {
+      try { collectJson(JSON.parse(line), out); } catch (_) {}
+      continue;
+    }
+    if (line.startsWith("$")) {
+      const r = parseNmea(line, rmcDate);
+      if (r?.date) rmcDate = r.date;
+      if (r?.point) out.push(r.point);
+      continue;
+    }
+    // 首輪のGNSS試作コードの出力（Latitude : / Longitude:）
+    const m = line.match(/^(Latitude|Longitude|Altitude|日本時間)\s*:\s*(.+)$/i);
+    if (m) {
+      const key = m[1].toLowerCase();
+      if (key === "latitude") pending.lat = parseFloat(m[2]);
+      if (key === "longitude") pending.lon = parseFloat(m[2]);
+      if (key === "日本時間" && /\d{4}-\d{2}-\d{2}/.test(m[2])) pending.t = m[2].replace(" ", "T") + "+09:00";
+      if (pending.lat !== undefined && pending.lon !== undefined) {
+        out.push(makePoint({ ...pending, source: "シリアル" }));
+        pending = {};
+      }
+    }
+  }
+  return out;
+}
+function collectJson(j, out) {
+  if (Array.isArray(j)) { j.forEach((x) => collectJson(x, out)); return; }
+  if (!j || typeof j !== "object") return;
+  if (Array.isArray(j.measurements)) { j.measurements.forEach((m) => collectJson({ ...m, device_id: m.device_id || j.cow_id }, out)); return; }
+  if (Array.isArray(j.records)) { j.records.forEach((r) => collectJson(r, out)); return; }
+  if (Array.isArray(j.cows)) {
+    for (const c of j.cows) {
+      const p = c.latest_position;
+      out.push(makePoint(p ? { lat: p.latitude, lon: p.longitude, acc: p.accuracy_m, hdop: p.hdop, sats: p.satellites,
+        t: p.measured_at, device: c.number || c.name || c.id, source: "最新位置" }
+        : { device: c.number || c.name || c.id, source: "最新位置" }));
+    }
+    return;
+  }
+  const lat = j.latitude ?? j.lat, lon = j.longitude ?? j.lon ?? j.lng;
+  if (lat === undefined && lon === undefined && !("measured_at" in j)) return;
+  out.push(makePoint({ lat, lon, acc: j.gps_accuracy_m ?? j.accuracy_m ?? j.accuracy, hdop: j.hdop, sats: j.satellites ?? j.sats,
+    t: j.measured_at ?? j.time ?? j.timestamp, device: j.device_id || j.number || "", source: "JSON" }));
+}
+function tryCsv(lines) {
+  const head = lines[0].split(/[,\t]/).map((s) => s.trim().toLowerCase());
+  const li = head.findIndex((h) => ["lat", "latitude", "緯度"].includes(h));
+  const oi = head.findIndex((h) => ["lon", "lng", "longitude", "経度"].includes(h));
+  if (li < 0 || oi < 0) return null;
+  const find = (names) => head.findIndex((h) => names.includes(h));
+  const ti = find(["time", "measured_at", "timestamp", "時刻"]), ai = find(["accuracy", "gps_accuracy_m", "accuracy_m", "精度"]);
+  const hi = find(["hdop"]), si = find(["sats", "satellites"]), di = find(["device_id", "device", "number"]);
+  return lines.slice(1).filter((l) => l.trim()).map((l) => {
+    const c = l.split(/[,\t]/).map((s) => s.trim());
+    return makePoint({ lat: c[li], lon: c[oi], t: ti >= 0 ? c[ti] : null, acc: ai >= 0 ? c[ai] : null,
+      hdop: hi >= 0 ? c[hi] : null, sats: si >= 0 ? c[si] : null, device: di >= 0 ? c[di] : "", source: "CSV" });
+  });
+}
+function nmeaCoord(v, hemi) {
+  if (!v) return null;
+  const dot = v.indexOf("."), deg = parseInt(v.slice(0, dot - 2), 10), min = parseFloat(v.slice(dot - 2));
+  let d = deg + min / 60;
+  if (hemi === "S" || hemi === "W") d = -d;
+  return d;
+}
+function nmeaTime(hms, date) {
+  if (!hms || hms.length < 6) return null;
+  const base = date || new Date().toISOString().slice(0, 10);
+  return `${base}T${hms.slice(0, 2)}:${hms.slice(2, 4)}:${hms.slice(4, 6)}Z`;
+}
+function parseNmea(line, date) {
+  const body = line.split("*")[0];
+  const f = body.split(",");
+  const type = f[0].slice(3);
+  if (type === "RMC") {
+    const d = f[9] && f[9].length === 6 ? `20${f[9].slice(4, 6)}-${f[9].slice(2, 4)}-${f[9].slice(0, 2)}` : date;
+    return { date: d, point: makePoint({ lat: nmeaCoord(f[3], f[4]), lon: nmeaCoord(f[5], f[6]), t: nmeaTime(f[1], d),
+      fix: f[2] === "A" ? 1 : 0, source: "NMEA RMC" }) };
+  }
+  if (type === "GGA") {
+    const hdop = num(f[8]);
+    return { point: makePoint({ lat: nmeaCoord(f[2], f[3]), lon: nmeaCoord(f[4], f[5]), t: nmeaTime(f[1], date),
+      fix: parseInt(f[6] || "0", 10), sats: num(f[7]), hdop, source: "NMEA GGA" }) };
+  }
+  return null;
+}
+
+function load(points, append) {
+  state.points = (append ? state.points.concat(points) : points)
+    .sort((a, b) => (a.t?.getTime() ?? Infinity) - (b.t?.getTime() ?? Infinity));
+  state.selected = state.points.length - 1;
+  render();
+  fit();
+}
+
+/* ===== 経路（アプリと同じ分割ルール） ===== */
+function segments() {
+  // 首輪ごとに分け、時刻順に結ぶ。「最新位置」は個体ごとに1点なので結ばない。
+  const groups = new Map();
+  for (const p of state.points) {
+    if (p.source === "最新位置") continue;
+    const key = p.device || "";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  }
+  const segs = [];
+  for (const list of groups.values()) {
+    let cur = [], prev = null;
+    const finish = () => { if (cur.length > 1) segs.push(cur); cur = []; };
+    for (const p of list) {
+      // 時刻の無い点はアプリに存在しないので、経路には繋げない。
+      if (!p.valid || !p.t) { finish(); prev = null; continue; }
+      if (prev && p.t - prev.t > RULES.routeGapMs) finish();
+      cur.push([p.lat, p.lon]); prev = p;
+    }
+    finish();
+  }
+  return segs;
+}
+
+/* ===== 描画 ===== */
+function render() {
+  Object.entries(layers).forEach(([k, l]) => { if (!["areas", "ref", "device"].includes(k)) l.clearLayers(); });
+  const pts = state.points;
+  if ($("showRoute").checked) {
+    for (const s of segments()) L.polyline(s, { color: "#fff", weight: 6, opacity: .8, interactive: false }).addTo(layers.route);
+    for (const s of segments()) L.polyline(s, { color: "#d9473d", weight: 3, interactive: false }).addTo(layers.route);
+  }
+  pts.forEach((p, i) => {
+    if (p.lat === null || p.lon === null) return;
+    if (!p.valid && !$("showBad").checked) return;
+    if ($("showAcc").checked && p.acc !== null && p.acc <= 1000) {
+      L.circle([p.lat, p.lon], { radius: p.acc, color: p.valid ? "#d9473d" : "#9a9a9e", weight: 1, opacity: .45,
+        fillOpacity: .06, interactive: false }).addTo(layers.acc);
+    }
+    const m = L.circleMarker([p.lat, p.lon], p.valid
+      ? { radius: 5, color: "#fff", weight: 1.5, fillColor: "#d9473d", fillOpacity: 1 }
+      : { radius: 5, color: "#9a9a9e", weight: 2, fillColor: "#fff", fillOpacity: .9 });
+    m.on("click", () => select(i, false));
+    m.bindTooltip(tip(p), { direction: "top" });
+    m.addTo(p.valid ? layers.good : layers.bad);
+  });
+  layers.areas.eachLayer((l) => l.setStyle({ opacity: $("showAreas").checked ? 1 : 0 }));
+  renderTable();
+  renderSelection();
+  renderStats();
+  $("countLabel").textContent = pts.length ? `${pts.filter((p) => p.valid).length} / ${pts.length}` : "";
+}
+function tip(p) {
+  return `${fmtTime(p.t)}${p.device ? " ・ " + p.device : ""}<br>${p.lat?.toFixed(6)}, ${p.lon?.toFixed(6)}` +
+    (p.acc !== null ? `<br>精度 ${p.acc.toFixed(1)} m` : "") + (p.reason ? `<br>除外：${p.reason}` : "");
+}
+function fmtTime(t) {
+  if (!t) return "時刻なし";
+  const z = (n) => String(n).padStart(2, "0");
+  return `${t.getMonth() + 1}/${t.getDate()} ${z(t.getHours())}:${z(t.getMinutes())}:${z(t.getSeconds())}`;
+}
+function renderTable() {
+  const rows = state.points.map((p, i) =>
+    `<tr data-i="${i}" class="${i === state.selected ? "sel" : ""} ${p.valid ? "" : "bad"}">` +
+    `<td>${fmtTime(p.t)}</td><td>${p.lat?.toFixed(6) ?? "—"}</td><td>${p.lon?.toFixed(6) ?? "—"}</td>` +
+    `<td>${p.acc !== null ? p.acc.toFixed(1) : "—"}</td><td>${p.area}</td><td>${p.reason || "使用"}</td></tr>`);
+  $("tbody").innerHTML = rows.join("");
+}
+$("tbody").addEventListener("click", (e) => {
+  const tr = e.target.closest("tr"); if (tr) select(Number(tr.dataset.i), true);
+});
+function select(i, pan) {
+  state.selected = i;
+  renderSelection();
+  document.querySelectorAll("#tbody tr").forEach((tr) => tr.classList.toggle("sel", Number(tr.dataset.i) === i));
+  const p = state.points[i];
+  if (pan && p && p.lat !== null) map.panTo([p.lat, p.lon]);
+  const row = document.querySelector(`#tbody tr[data-i="${i}"]`);
+  if (row && !pan) row.scrollIntoView({ block: "nearest" });
+}
+function renderSelection() {
+  layers.sel.clearLayers();
+  const hud = $("hud");
+  const n = state.points.length;
+  hud.hidden = n === 0;
+  if (!n) return;
+  $("slider").max = n - 1;
+  $("slider").value = Math.max(0, state.selected);
+  const p = state.points[state.selected];
+  if (!p) return;
+  if (p.lat !== null) {
+    L.circleMarker([p.lat, p.lon], { radius: 10, color: "#1f1f21", weight: 2.5, fill: false, interactive: false }).addTo(layers.sel);
+  }
+  const parts = [
+    `<b>${fmtTime(p.t)}</b>`,
+    p.device ? `首輪 ${p.device}` : "",
+    p.lat !== null ? `${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}` : "座標なし",
+    p.acc !== null ? `精度 ${p.acc.toFixed(1)} m` : "精度 不明",
+    p.hdop !== null ? `HDOP ${p.hdop}` : "",
+    p.sats !== null ? `衛星 ${p.sats}` : "",
+    ["区画外", "区画未設定"].includes(p.area) ? p.area : `区画 ${p.area}`,
+    p.t && Date.now() - p.t > RULES.staleMs ? "15分超（アプリでは灰色）" : "",
+    p.reason ? `<span style="color:var(--accent)">除外：${p.reason}</span>` : "アプリで使用",
+    state.ref && p.lat !== null ? `基準点から ${meters(state.ref, [p.lat, p.lon]).toFixed(1)} m` : "",
+    p.source ? `<span style="color:var(--muted)">${p.source}</span>` : "",
+  ].filter(Boolean);
+  $("hudInfo").innerHTML = parts.join("<span style='color:var(--line)'>│</span>");
+}
+$("slider").addEventListener("input", (e) => select(Number(e.target.value), true));
+
+function renderStats() {
+  const valid = state.points.filter((p) => p.valid);
+  const box = $("stats");
+  if (!state.ref || !valid.length) { box.innerHTML = ""; return; }
+  const d = valid.map((p) => meters(state.ref, [p.lat, p.lon])).sort((a, b) => a - b);
+  const q = (r) => d[Math.min(d.length - 1, Math.floor(r * (d.length - 1) + .5))];
+  const mean = d.reduce((s, v) => s + v, 0) / d.length;
+  const off = valid.reduce((s, p) => { const o = offsetNE(state.ref, [p.lat, p.lon]); return { n: s.n + o.n, e: s.e + o.e }; }, { n: 0, e: 0 });
+  off.n /= valid.length; off.e /= valid.length;
+  const dir = `${off.n >= 0 ? "北" : "南"}${Math.abs(off.n).toFixed(1)}m ${off.e >= 0 ? "東" : "西"}${Math.abs(off.e).toFixed(1)}m`;
+  const inside = valid.filter((p) => p.area !== "区画外").length;
+  box.innerHTML = [
+    ["中央値", q(.5).toFixed(1) + " m"], ["平均", mean.toFixed(1) + " m"], ["95%", q(.95).toFixed(1) + " m"],
+    ["最大", d[d.length - 1].toFixed(1) + " m"], ["平均のずれ", dir], ["区画内", site.boundaries ? `${inside}/${valid.length}` : "未設定"],
+  ].map(([k, v]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join("");
+}
+
+function fit() {
+  const ll = state.points.filter((p) => p.lat !== null && (p.valid || $("showBad").checked)).map((p) => [p.lat, p.lon]);
+  if (state.ref) ll.push(state.ref);
+  if (ll.length === 1) map.setView(ll[0], 18);
+  else if (ll.length) map.fitBounds(ll, { paddingTopLeft: [40, 40], paddingBottomRight: [40, 150], maxZoom: 19 });
+  else if (layers.areas.getLayers().length) map.fitBounds(L.featureGroup(layers.areas.getLayers()).getBounds(), { padding: [30, 30] });
+  else map.setView(site.center, site.zoom);
+}
+$("fitBtn").onclick = fit;
+["showAcc", "showRoute", "showBad", "showAreas"].forEach((id) => $(id).addEventListener("change", render));
+
+/* ===== 貼り付け・ドロップ ===== */
+$("parsePaste").onclick = () => {
+  const pts = parseAny($("pasteBox").value);
+  status("parseStatus", pts.length ? `${pts.length}点を読み込みました（使用 ${pts.filter((p) => p.valid).length}）` : "位置を含むデータが見つかりません", !pts.length);
+  if (pts.length) load(pts, $("appendMode").checked);
+};
+$("clearAll").onclick = () => { state.points = []; state.selected = -1; render(); status("parseStatus", ""); };
+$("fileBtn").onclick = () => $("fileInput").click();
+$("fileInput").onchange = async (e) => {
+  try {
+    let points = [];
+    for (const file of e.target.files) points = points.concat(parseAny(await file.text()));
+    status("parseStatus", `${points.length}点を読み込みました`, !points.length);
+    if (points.length) load(points, $("appendMode").checked);
+  } catch (err) { status("parseStatus", "ファイル読み込み失敗：" + err.message, true); }
+  e.target.value = "";
+};
+const box = $("pasteBox");
+box.addEventListener("dragover", (e) => { e.preventDefault(); box.classList.add("drag"); });
+box.addEventListener("dragleave", () => box.classList.remove("drag"));
+box.addEventListener("drop", async (e) => {
+  e.preventDefault(); box.classList.remove("drag");
+  const files = [...e.dataTransfer.files];
+  let all = [];
+  for (const f of files) all = all.concat(parseAny(await f.text()));
+  status("parseStatus", `${files.length}ファイルから${all.length}点`, !all.length);
+  if (all.length) load(all, $("appendMode").checked);
+});
+function status(id, text, err) { const el = $(id); el.textContent = text; el.classList.toggle("err", !!err); }
+
+/* ===== API（serve.py 経由） ===== */
+const today = new Date();
+$("dateInput").value = new Date(today.getTime() + 9 * 3600e3).toISOString().slice(0, 10);
+fetch("config.json").then((r) => r.json()).then(async (cfg) => {
+  if (!cfg.api) { status("apiStatus", "API中継なし（serve.py --api で有効）"); return; }
+  const res = await fetch("api/v1/dashboard");
+  if (!res.ok) throw new Error(`ダッシュボード取得失敗（${res.status}）`);
+  const dash = await res.json();
+  state.dashboard = dash;
+  $("cowSelect").innerHTML = dash.cows.map((c) => `<option value="${encodeURIComponent(c.id)}">${c.number || c.name}（${c.device_id || c.id}）</option>`).join("");
+  ["cowSelect", "loadHistory", "loadLatest"].forEach((id) => $(id).disabled = false);
+  status("apiStatus", `${dash.cows.length}頭 ・ ${new Date(dash.generated_at).toLocaleString("ja-JP")}`);
+}).catch((e) => status("apiStatus", e.message || "API接続失敗", true));
+
+$("loadHistory").onclick = async () => {
+  const id = $("cowSelect").value, date = $("dateInput").value;
+  status("apiStatus", "取得中…");
+  try {
+    const res = await fetch(`api/v1/cows/${id}/history?date=${date}`);
+    if (!res.ok) throw new Error(`履歴取得失敗（${res.status}）`);
+    const pts = parseAny(await res.text());
+    status("apiStatus", `${date} ・ ${pts.length}件（位置あり ${pts.filter((p) => p.lat !== null).length}）`, !pts.length);
+    load(pts, $("appendMode").checked);
+  } catch (e) { status("apiStatus", e.message, true); }
+};
+$("loadLatest").onclick = () => {
+  const pts = []; collectJson(state.dashboard, pts);
+  status("apiStatus", `最新位置 ${pts.filter((p) => p.lat !== null).length} / ${pts.length}頭`);
+  load(pts, false);
+};
+
+/* ===== USB（Web Serial） ===== */
+let port = null, reader = null;
+$("serialBtn").onclick = async () => {
+  if (port) { await disconnect(); return; }
+  if (!("serial" in navigator)) { status("serialStatus", "このブラウザはUSB接続に未対応（Chrome / Edge を使用）", true); return; }
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: Number($("baud").value) });
+    $("serialBtn").textContent = "切断"; $("serialBtn").classList.add("on");
+    status("serialStatus", "受信中");
+    readLoop();
+  } catch (e) { port = null; status("serialStatus", e.message, true); }
+};
+async function readLoop() {
+  const decoder = new TextDecoderStream();
+  const closed = port.readable.pipeTo(decoder.writable).catch(() => {});
+  reader = decoder.readable.getReader();
+  let buf = "", got = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      const lines = buf.split(/\r?\n/); buf = lines.pop();
+      const pts = parseAny(lines.join("\n"));
+      if (pts.length) {
+        got += pts.length;
+        state.points = state.points.concat(pts);
+        state.selected = state.points.length - 1;
+        render();
+        const p = state.points[state.selected];
+        if ($("follow").checked && p.lat !== null) map.panTo([p.lat, p.lon]);
+        status("serialStatus", `受信中 ・ ${got}点`);
+      }
+    }
+  } catch (e) { status("serialStatus", e.message, true); }
+  await closed;
+}
+async function disconnect() {
+  try { await reader?.cancel(); await port?.close(); } catch (_) {}
+  port = null; reader = null;
+  $("serialBtn").textContent = "接続"; $("serialBtn").classList.remove("on");
+  status("serialStatus", "切断しました");
+}
+
+/* ===== 基準点 ===== */
+let picking = false;
+$("pickRef").onclick = () => { picking = !picking; $("pickRef").classList.toggle("on", picking); map.getContainer().style.cursor = picking ? "crosshair" : ""; };
+map.on("click", (e) => {
+  if (!picking) return;
+  picking = false; $("pickRef").classList.remove("on"); map.getContainer().style.cursor = "";
+  setRef([e.latlng.lat, e.latlng.lng], "地図で指定");
+});
+map.on("mousemove", (e) => {
+  $("cursor").textContent = `${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)} ・ ${areaOf(e.latlng.lat, e.latlng.lng)}`;
+});
+$("setRef").onclick = () => {
+  const m = $("refInput").value.match(/(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/);
+  if (!m) { status("refStatus", "「緯度, 経度」の形で入力", true); return; }
+  setRef([parseFloat(m[1]), parseFloat(m[2])], "入力");
+};
+$("clearRef").onclick = () => { state.ref = null; layers.ref.clearLayers(); status("refStatus", ""); render(); };
+function setRef(ll, how) {
+  state.ref = ll;
+  layers.ref.clearLayers();
+  L.circleMarker(ll, { radius: 7, color: "#fff", weight: 2, fillColor: "#2f6fd6", fillOpacity: 1 })
+    .bindTooltip(`基準点（${how}）`).addTo(layers.ref);
+  $("refInput").value = `${ll[0].toFixed(6)}, ${ll[1].toFixed(6)}`;
+  status("refStatus", `基準点：${how} ・ ${areaOf(ll[0], ll[1])}`);
+  render();
+}
+let watchId = null;
+$("geoBtn").onclick = () => {
+  if (watchId !== null) {
+    navigator.geolocation.clearWatch(watchId); watchId = null; layers.device.clearLayers();
+    $("geoBtn").classList.remove("on"); return;
+  }
+  if (!navigator.geolocation) { status("refStatus", "この端末は位置情報に未対応", true); return; }
+  $("geoBtn").classList.add("on");
+  let first = true;
+  watchId = navigator.geolocation.watchPosition((pos) => {
+    const ll = [pos.coords.latitude, pos.coords.longitude];
+    layers.device.clearLayers();
+    L.circle(ll, { radius: pos.coords.accuracy, color: "#2f6fd6", weight: 1, fillOpacity: .08, interactive: false }).addTo(layers.device);
+    L.circleMarker(ll, { radius: 6, color: "#fff", weight: 2, fillColor: "#2f6fd6", fillOpacity: 1 }).addTo(layers.device);
+    if (first) { setRef(ll, `端末の現在地 ±${Math.round(pos.coords.accuracy)}m`); map.setView(ll, 18); first = false; }
+  }, (err) => { status("refStatus", "現在地を取得できません：" + err.message, true); $("geoBtn").classList.remove("on"); watchId = null; },
+  { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+};
+
+render();
+</script>
+</body>
+</html>

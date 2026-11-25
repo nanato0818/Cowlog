@@ -1,0 +1,137 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Cowlog HTTPS prototype backend (single farm, three separate bearer credentials).
+Parameters:
+  FarmId:
+    Type: String
+    Default: daigo
+    AllowedPattern: '[A-Za-z0-9_-]{1,40}'
+  CredentialRevision:
+    Type: String
+    Default: "1"
+Resources:
+  Registry:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: pk, AttributeType: S}
+        - {AttributeName: sk, AttributeType: S}
+      KeySchema:
+        - {AttributeName: pk, KeyType: HASH}
+        - {AttributeName: sk, KeyType: RANGE}
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+  Measurements:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: device_id, AttributeType: S}
+        - {AttributeName: record_key, AttributeType: S}
+      KeySchema:
+        - {AttributeName: device_id, KeyType: HASH}
+        - {AttributeName: record_key, KeyType: RANGE}
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+  Areas:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: farm_id, AttributeType: S}
+        - {AttributeName: area_id, AttributeType: S}
+      KeySchema:
+        - {AttributeName: farm_id, KeyType: HASH}
+        - {AttributeName: area_id, KeyType: RANGE}
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+  ReadSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Cowlog prototype read credential
+      GenerateSecretString: {PasswordLength: 48, ExcludePunctuation: true}
+  ManageSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Cowlog prototype number and collar management credential
+      GenerateSecretString: {PasswordLength: 48, ExcludePunctuation: true}
+  IngestSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Cowlog prototype telemetry credential (never embed in app)
+      GenerateSecretString: {PasswordLength: 48, ExcludePunctuation: true}
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+      DefaultRouteSettings:
+        ThrottlingRateLimit: 10
+        ThrottlingBurstLimit: 20
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      CodeUri: ../../apps/api/
+      Handler: aws_backend.handler
+      Runtime: python3.12
+      Architectures: [arm64]
+      MemorySize: 512
+      Timeout: 28
+      Environment:
+        Variables:
+          REGISTRY_TABLE: !Ref Registry
+          MEASUREMENTS_TABLE: !Ref Measurements
+          AREAS_TABLE: !Ref Areas
+          FARM_ID: !Ref FarmId
+          CREDENTIAL_REVISION: !Ref CredentialRevision
+          COWLOG_READ_TOKEN: !Sub '{{resolve:secretsmanager:${ReadSecret}:SecretString}}'
+          COWLOG_MANAGE_TOKEN: !Sub '{{resolve:secretsmanager:${ManageSecret}:SecretString}}'
+          COWLOG_INGEST_TOKEN: !Sub '{{resolve:secretsmanager:${IngestSecret}:SecretString}}'
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+              Resource: [!GetAtt Registry.Arn, !GetAtt Measurements.Arn]
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt Areas.Arn
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /{proxy+}
+            Method: ANY
+            PayloadFormatVersion: '2.0'
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ApiFunction}'
+      RetentionInDays: 14
+Outputs:
+  ApiUrl:
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/'
+  FarmId:
+    Value: !Ref FarmId
+  RegistryTable:
+    Value: !Ref Registry
+  MeasurementsTable:
+    Value: !Ref Measurements
+  AreasTable:
+    Value: !Ref Areas
+  ReadSecretArn:
+    Value: !Ref ReadSecret
+  ManageSecretArn:
+    Value: !Ref ManageSecret
+  IngestSecretArn:
+    Value: !Ref IngestSecret

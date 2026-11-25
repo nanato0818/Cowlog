@@ -40,3 +40,13 @@ __pycache__/
 .build/
 .swiftpm/xcode/package.xcworkspace/xcuserdata/
 *.xcuserstate
+
+# Local AWS/app credentials
+.private/
+.env.cowlog*.json
+
+.aws-sam/
+.venv/
+
+# Local agent settings
+.claude/settings.local.json

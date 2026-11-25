@@ -1,0 +1,4 @@
+-r ../../apps/api/requirements.txt
+moto[dynamodb]==5.2.5
+PyYAML==6.0.3
+cfn-lint==1.60.0

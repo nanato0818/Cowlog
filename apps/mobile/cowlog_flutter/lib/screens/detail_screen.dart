@@ -1,18 +1,24 @@
-import 'dart:math' as math;
-
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-
 import '../models.dart';
+import '../farm_map.dart';
+import '../app_theme.dart';
+import '../activity_summary.dart';
+import '../widgets/activity_charts.dart';
+import '../route_segments.dart';
 import '../state/app_store.dart';
 import 'dashboard_screen.dart';
+import 'map_screen.dart';
+
+String dayKey(DateTime d) => '${d.year}-${d.month}-${d.day}';
 
 class DetailScreen extends StatefulWidget {
   const DetailScreen({super.key, required this.store, required this.cow});
   final AppStore store;
   final Cow cow;
-
   @override
   State<DetailScreen> createState() => _DetailScreenState();
 }
@@ -20,275 +26,559 @@ class DetailScreen extends StatefulWidget {
 class _DetailScreenState extends State<DetailScreen> {
   late DateTime _date;
   CowHistory? _history;
-  String? _error;
-  var _loading = true;
+  final Map<String, DailyActivity?> _summaries = {};
+  bool _loading = true, _failed = false, _partial = false, _aerial = true;
+  int _request = 0, _pointIndex = 0;
+  List<DateTime> get _days {
+    final today = farmToday();
+    final end = _date.isBefore(today.subtract(const Duration(days: 6)))
+        ? _date
+        : today;
+    return List.generate(7, (i) => end.subtract(Duration(days: 6 - i)));
+  }
 
   @override
   void initState() {
     super.initState();
-    _date = DateTime.now();
+    _date = farmToday();
     _load();
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  Future<void> _load({bool force = false}) async {
+    final request = ++_request, date = _date;
+    final days = _days;
+    setState(() {
+      _loading = true;
+      _failed = false;
+      _partial = false;
+    });
+    final now = DateTime.now();
     try {
-      final history = await widget.store.history(widget.cow.id, _date);
-      if (mounted) {
-        setState(() {
-          _history = history;
-          _error = null;
-        });
-      }
-    } catch (error) {
-      if (mounted) {
-        setState(() {
-          _history = null;
-          _error = error.toString();
-        });
-      }
+      final current = await widget.store.history(
+        widget.cow.id,
+        date,
+        force: force,
+      );
+      if (!mounted || request != _request) return;
+      setState(() {
+        _history = current;
+        _summaries.removeWhere((k, _) => !days.any((d) => dayKey(d) == k));
+        _pointIndex =
+            (current.measurements.where((m) => m.hasUsableCoordinate).length -
+                    1)
+                .clamp(0, 1000000);
+        _summaries[dayKey(date)] = DailyActivity.fromMeasurements(
+          date,
+          current.measurements,
+          now: now,
+        );
+      });
+      final results = await Future.wait(
+        days.where((d) => dayKey(d) != dayKey(date)).map((day) async {
+          try {
+            final h = await widget.store.history(
+              widget.cow.id,
+              day,
+              force: force,
+            );
+            return MapEntry(
+              dayKey(day),
+              DailyActivity.fromMeasurements(day, h.measurements, now: now),
+            );
+          } catch (_) {
+            return MapEntry<String, DailyActivity?>(dayKey(day), null);
+          }
+        }),
+      );
+      if (!mounted || request != _request) return;
+      setState(() {
+        _summaries.addEntries(results);
+        _partial = results.any((r) => r.value == null);
+      });
+    } catch (_) {
+      if (mounted && request == _request) setState(() => _failed = true);
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && request == _request) setState(() => _loading = false);
     }
   }
 
-  List<List<LatLng>> get _segments {
-    final history = _history;
-    if (history == null) return [];
-    final result = <List<LatLng>>[];
-    var current = <LatLng>[];
-    DateTime? previous;
-    for (final item in history.measurements) {
-      if (!item.hasUsableCoordinate) {
-        if (current.length > 1) result.add(current);
-        current = [];
-        previous = null;
-        continue;
-      }
-      if (previous != null &&
-          item.measuredAt.difference(previous).inHours > 1) {
-        if (current.length > 1) result.add(current);
-        current = [];
-      }
-      current.add(LatLng(item.latitude!, item.longitude!));
-      previous = item.measuredAt;
+  Future<void> _pickDate() async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: DateTime(2025),
+      lastDate: farmToday(),
+    );
+    if (date != null && mounted) {
+      setState(() => _date = date);
+      _load();
     }
-    if (current.length > 1) result.add(current);
-    return result;
   }
 
   double get _distanceKm {
     const distance = Distance();
     var meters = 0.0;
-    for (final segment in _segments) {
-      for (var index = 1; index < segment.length; index++) {
-        meters += distance(segment[index - 1], segment[index]);
+    for (final segment in routeSegments(_history?.measurements ?? [])) {
+      for (var i = 1; i < segment.length; i++) {
+        meters += distance(segment[i - 1], segment[i]);
       }
     }
     return meters / 1000;
   }
 
   @override
-  Widget build(BuildContext context) {
-    final positions = _segments.expand((segment) => segment).toList();
-    final valid =
-        _history?.measurements
-            .where((item) => item.coverageSeconds > 0)
-            .toList() ??
-        [];
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.store,
+    builder: (context, _) => _content(context),
+  );
+
+  Widget _content(BuildContext context) {
+    final cow =
+        widget.store.dashboard?.cows
+            .where((c) => c.id == widget.cow.id)
+            .firstOrNull ??
+        widget.cow;
+    final points =
+        _history?.measurements.where((m) => m.hasUsableCoordinate).toList() ??
+        <Measurement>[];
+    final selected = points.isEmpty
+        ? null
+        : points[_pointIndex.clamp(0, points.length - 1)];
+    final notice = widget.store.isOffline
+        ? 'オフライン'
+        : (_failed || _partial)
+        ? '一部未取得'
+        : null;
+    const heading = TextStyle(fontSize: 14, fontWeight: FontWeight.w600);
     return Scaffold(
-      appBar: AppBar(title: Text(widget.cow.name)),
+      appBar: AppBar(
+        actions: [
+          if (widget.store.demoMode) const Center(child: DemoBadge()),
+          IconButton(
+            tooltip: '更新',
+            onPressed: _loading ? null : () => _load(force: true),
+            icon: const Icon(CupertinoIcons.arrow_clockwise, size: 24),
+          ),
+          const SizedBox(width: 6),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(2),
+          child: _loading
+              ? const LinearProgressIndicator(minHeight: 2)
+              : const SizedBox(height: 2),
+        ),
+      ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 40),
         children: [
           Row(
-            children: [
-              _StatusLabel(status: widget.cow.status),
-              const Spacer(),
-              if (widget.cow.batteryPercent case final battery?)
-                Text('電池 $battery%'),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(widget.cow.reason),
-          if (widget.cow.latestMeasuredAt case final measured?)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                '最後の測定: ${dateTimeLabel(measured)}',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ),
-          const SizedBox(height: 20),
-          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(
                 child: Text(
-                  '表示する日: ${FarmDate.format(_date)}',
-                  style: Theme.of(context).textTheme.titleSmall,
+                  cow.displayNumber,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 40,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -1,
+                    fontFeatures: tabularFigures,
+                  ),
                 ),
               ),
-              TextButton.icon(
-                onPressed: () async {
-                  final picked = await showDatePicker(
-                    context: context,
-                    initialDate: _date,
-                    firstDate: DateTime(2025),
-                    lastDate: DateTime.now(),
-                  );
-                  if (picked != null) {
-                    setState(() => _date = picked);
-                    _load();
-                  }
-                },
-                icon: const Icon(Icons.calendar_today),
-                label: const Text('変更'),
+              if (cow.batteryPercent != null) ...[
+                const Icon(
+                  CupertinoIcons.battery_75_percent,
+                  size: 19,
+                  color: AppColors.muted,
+                ),
+                Text(
+                  '${cow.batteryPercent}%',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: AppColors.muted,
+                    fontFeatures: tabularFigures,
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ],
+              StatusLabel(
+                text: cow.status.label,
+                urgent:
+                    cow.status == CowStatus.check ||
+                    cow.status == CowStatus.unknown,
               ),
             ],
           ),
-          if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(child: CircularProgressIndicator()),
-            ),
-          if (_error case final message?)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Text(
-                message,
-                style: const TextStyle(color: Colors.orange),
-              ),
-            ),
-          const SizedBox(height: 16),
-          Text('移動経路', style: Theme.of(context).textTheme.titleLarge),
-          if (positions.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Text('この日の位置記録はありません'),
-            )
-          else ...[
-            Padding(
-              padding: const EdgeInsets.only(top: 6, bottom: 8),
-              child: Text('参考移動距離: ${_distanceKm.toStringAsFixed(1)} km'),
-            ),
-            SizedBox(
-              height: 280,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: FlutterMap(
-                  options: MapOptions(
-                    initialCenter: positions.first,
-                    initialZoom: 14,
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Pill(
+                leading: const Padding(
+                  padding: EdgeInsets.only(left: 6),
+                  child: Icon(
+                    CupertinoIcons.calendar,
+                    size: 16,
+                    color: AppColors.ink,
                   ),
-                  children: [
-                    TileLayer(
-                      urlTemplate:
-                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'jp.ac.yuge.cowlog',
-                    ),
-                    PolylineLayer(
-                      polylines: [
-                        for (final segment in _segments)
-                          Polyline(
-                            points: segment,
-                            color: Colors.blue,
-                            strokeWidth: 3,
-                          ),
-                      ],
-                    ),
-                    MarkerLayer(
-                      markers: [
-                        Marker(
-                          point: positions.last,
-                          width: 44,
-                          height: 44,
-                          child: const Icon(
-                            Icons.location_pin,
-                            color: Colors.red,
-                            size: 38,
+                ),
+                label:
+                    '${_date.year}.${_date.month.toString().padLeft(2, '0')}.${_date.day.toString().padLeft(2, '0')}',
+                selected: false,
+                onTap: _pickDate,
+              ),
+              const Spacer(),
+              if (notice != null) NoticeBadge(text: notice),
+            ],
+          ),
+          const SizedBox(height: 10),
+          LiveCard(
+            icon: CupertinoIcons.chart_pie_fill,
+            title: '1日の内訳',
+            child: ActivityRings(summary: _summaries[dayKey(_date)]),
+          ),
+          const SizedBox(height: 10),
+          LiveCard(
+            icon: CupertinoIcons.chart_bar_alt_fill,
+            title: '日平均の活動率',
+            child: DailyActivityBars(
+              days: _days,
+              summaries: _summaries,
+              selected: _date,
+              onSelect: (d) {
+                if (dayKey(d) != dayKey(_date)) {
+                  HapticFeedback.selectionClick();
+                  setState(() => _date = d);
+                  _load();
+                }
+              },
+            ),
+          ),
+          const SizedBox(height: 10),
+          Card(
+            margin: EdgeInsets.zero,
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 8, 6, 8),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        CupertinoIcons.map_pin_ellipse,
+                        size: 16,
+                        color: AppColors.accent,
+                      ),
+                      const SizedBox(width: 6),
+                      const Text('経路', style: heading),
+                      const SizedBox(width: 10),
+                      Text(
+                        points.isEmpty
+                            ? '—'
+                            : '約 ${_distanceKm.toStringAsFixed(1)} km',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: AppColors.muted,
+                          fontFeatures: tabularFigures,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: '全画面',
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => RouteMapScreen(
+                              cow: cow,
+                              history: _history,
+                              demo: widget.store.demoMode,
+                            ),
                           ),
                         ),
-                      ],
-                    ),
-                  ],
+                        icon: const Icon(
+                          CupertinoIcons.arrow_up_left_arrow_down_right,
+                          size: 22,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '距離は測位点を結んだ概算です。精度が100mを超える点と、1時間を超える空白はつなぎません。',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
-          const SizedBox(height: 24),
-          Text('行動量の推移', style: Theme.of(context).textTheme.titleLarge),
-          if (valid.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Text('この日の行動量記録はありません'),
-            )
-          else ...[
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 180,
-              child: CustomPaint(
-                painter: _ActivityPainter(
-                  valid.map((item) => item.activityRatio).toList(),
-                  Theme.of(context).colorScheme.primary,
+                SizedBox(
+                  height: 290,
+                  child: RouteMapCanvas(
+                    key: ValueKey('route-${_history?.date}'),
+                    records: _history?.measurements ?? [],
+                    selected: selected,
+                    aerial: _aerial,
+                  ),
                 ),
-                child: const SizedBox.expand(),
-              ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 4, 18, 0),
+                  child: Row(
+                    children: [
+                      TextButton(
+                        onPressed: () => setState(() => _aerial = !_aerial),
+                        child: Text(
+                          _aerial ? '地図' : '航空写真',
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        selected == null
+                            ? '位置なし'
+                            : dateTimeLabel(selected.measuredAt),
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          fontFeatures: tabularFigures,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (points.length > 1)
+                  Slider(
+                    value: _pointIndex.clamp(0, points.length - 1).toDouble(),
+                    min: 0,
+                    max: (points.length - 1).toDouble(),
+                    divisions: points.length - 1,
+                    onChanged: (v) => setState(() => _pointIndex = v.round()),
+                  )
+                else
+                  const SizedBox(height: 12),
+              ],
             ),
-            Text(
-              '活動率 = 動きがあった秒数 ÷ 測定できた秒数。測定できなかった時間は除外しています。',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
+          ),
         ],
       ),
     );
   }
 }
 
-class _StatusLabel extends StatelessWidget {
-  const _StatusLabel({required this.status});
-  final CowStatus status;
+class RouteMapCanvas extends StatelessWidget {
+  const RouteMapCanvas({
+    super.key,
+    required this.records,
+    required this.selected,
+    required this.aerial,
+    this.padding = const EdgeInsets.all(30),
+  });
+  final List<Measurement> records;
+  final Measurement? selected;
+  final bool aerial;
+  final EdgeInsets padding;
   @override
-  Widget build(BuildContext context) => Text(
-    status.label,
-    style: TextStyle(fontWeight: FontWeight.bold, color: statusColor(status)),
-  );
+  Widget build(BuildContext context) {
+    final points = records
+        .where((m) => m.hasUsableCoordinate)
+        .map((m) => LatLng(m.latitude!, m.longitude!))
+        .toList();
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: FlutterMap(
+            options: MapOptions(
+              initialCenter: FarmMap.center,
+              maxZoom: 20,
+              initialCameraFit: CameraFit.bounds(
+                bounds: LatLngBounds.fromPoints(
+                  points.isEmpty ? FarmMap.boundary : points,
+                ),
+                padding: padding,
+                maxZoom: 17,
+              ),
+            ),
+            children: [
+              FarmMap.tiles(aerial),
+              FarmMap.outline(),
+              PolylineLayer(
+                polylines: [
+                  for (final segment in routeSegments(records))
+                    Polyline(
+                      points: segment,
+                      color: AppColors.accent,
+                      strokeWidth: 4,
+                      borderColor: Colors.white,
+                      borderStrokeWidth: 1.5,
+                    ),
+                ],
+              ),
+              if (selected?.gpsAccuracyM != null)
+                CircleLayer(
+                  circles: [
+                    CircleMarker(
+                      point: LatLng(selected!.latitude!, selected!.longitude!),
+                      radius: selected!.gpsAccuracyM!,
+                      useRadiusInMeter: true,
+                      color: Colors.white.withValues(alpha: .14),
+                      borderColor: Colors.white.withValues(alpha: .6),
+                      borderStrokeWidth: 1,
+                    ),
+                  ],
+                ),
+              MarkerLayer(
+                markers: [
+                  if (points.isNotEmpty)
+                    Marker(
+                      point: points.first,
+                      width: 22,
+                      height: 22,
+                      child: const Icon(
+                        CupertinoIcons.circle,
+                        color: Colors.white,
+                        size: 17,
+                      ),
+                    ),
+                  if (selected != null)
+                    Marker(
+                      point: LatLng(selected!.latitude!, selected!.longitude!),
+                      width: 26,
+                      height: 26,
+                      child: Container(
+                        margin: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          gradient: AppColors.glow,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 3),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        Positioned(right: 5, bottom: 5, child: MapCredit(aerial: aerial)),
+      ],
+    );
+  }
 }
 
-class _ActivityPainter extends CustomPainter {
-  const _ActivityPainter(this.values, this.color);
-  final List<double> values;
-  final Color color;
+class RouteMapScreen extends StatefulWidget {
+  const RouteMapScreen({
+    super.key,
+    required this.cow,
+    required this.history,
+    required this.demo,
+  });
+  final Cow cow;
+  final CowHistory? history;
+  final bool demo;
   @override
-  void paint(Canvas canvas, Size size) {
-    final baseline = size.height - 22;
-    final barWidth = math.max(2.0, size.width / values.length - 2);
-    final paint = Paint()..color = color.withValues(alpha: .72);
-    canvas.drawLine(
-      Offset(0, baseline),
-      Offset(size.width, baseline),
-      Paint()..color = Colors.grey.shade400,
-    );
-    for (var i = 0; i < values.length; i++) {
-      final height = (baseline - 8) * values[i].clamp(0, 1);
-      canvas.drawRect(
-        Rect.fromLTWH(
-          i * (size.width / values.length),
-          baseline - height,
-          barWidth,
-          height,
-        ),
-        paint,
-      );
-    }
-  }
+  State<RouteMapScreen> createState() => _RouteMapScreenState();
+}
 
+class _RouteMapScreenState extends State<RouteMapScreen> {
+  bool _aerial = true;
+  int? _index;
   @override
-  bool shouldRepaint(covariant _ActivityPainter oldDelegate) =>
-      oldDelegate.values != values || oldDelegate.color != color;
+  Widget build(BuildContext context) {
+    final records = widget.history?.measurements ?? [];
+    final points = records.where((m) => m.hasUsableCoordinate).toList();
+    final index = (_index ?? points.length - 1).clamp(
+      0,
+      points.isEmpty ? 0 : points.length - 1,
+    );
+    final selected = points.isEmpty ? null : points[index];
+    return Scaffold(
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: RouteMapCanvas(
+              records: records,
+              selected: selected,
+              aerial: _aerial,
+              padding: const EdgeInsets.fromLTRB(32, 150, 32, 180),
+            ),
+          ),
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Row(
+                children: [
+                  MapControl(
+                    icon: CupertinoIcons.back,
+                    label: '戻る',
+                    onTap: () => Navigator.pop(context),
+                  ),
+                  const SizedBox(width: 10),
+                  Glass(
+                    radius: 23,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 11,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.cow.displayNumber,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            fontFeatures: tabularFigures,
+                          ),
+                        ),
+                        if (widget.demo) ...[
+                          const SizedBox(width: 8),
+                          const DemoBadge(),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const Spacer(),
+                  MapControl(
+                    icon: CupertinoIcons.layers_alt,
+                    label: '地図切替',
+                    onTap: () => setState(() => _aerial = !_aerial),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SafeArea(
+            top: false,
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Glass(
+                  radius: 26,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          selected == null
+                              ? '位置なし'
+                              : dateTimeLabel(selected.measuredAt),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 17,
+                            fontFeatures: tabularFigures,
+                          ),
+                        ),
+                        if (points.length > 1)
+                          Slider(
+                            value: index.toDouble(),
+                            min: 0,
+                            max: (points.length - 1).toDouble(),
+                            divisions: points.length - 1,
+                            onChanged: (v) =>
+                                setState(() => _index = v.round()),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

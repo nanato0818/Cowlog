@@ -29,7 +29,7 @@ class ApiDataTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.db = str(Path(self.temp.name) / "test.sqlite3")
         init_db(self.db)
-        register_cow(self.db, "cow-01", "うし1", "collar-01")
+        register_cow(self.db, "cow-01", "うし1", "collar-01", NOW - timedelta(days=30))
 
     def tearDown(self):
         self.temp.cleanup()

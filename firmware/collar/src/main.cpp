@@ -4,8 +4,11 @@
 #include <TinyGPSPlus.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <esp_system.h>
 
+#ifndef COWLOG_TELEMETRY
 #include "secrets.h"
+#endif
 
 
 // L76K GNSS Module for XIAO uses the XIAO hardware UART pins:
@@ -296,6 +299,7 @@ void printJapanTime()
                 gps.time.minute(), gps.time.second());
 }
 
+#ifndef COWLOG_TELEMETRY
 String reverseGeocode(double latitude, double longitude)
 {
   if (WiFi.status() != WL_CONNECTED) {
@@ -361,6 +365,8 @@ void updateAddressIfNeeded(double latitude, double longitude)
   hasAddressPosition = true;
 }
 
+#endif
+
 void printGnssData()
 {
   Serial.println("--- GNSS fix ---");
@@ -389,6 +395,43 @@ void printGnssData()
   Serial.println(currentAddress);
 }
 
+#ifdef COWLOG_TELEMETRY
+// GNSS-only USB telemetry. Activity is unknown (coverage=0), never invented.
+uint32_t telemetryStream = 0;
+uint32_t telemetrySequence = 0;
+uint32_t lastTelemetryAt = 0;
+String telemetryDevice;
+
+void emitTelemetry()
+{
+  if (millis() - lastTelemetryAt < 15000 || !gps.location.isUpdated() ||
+      !gps.location.isValid() || gps.location.age() > 2000 ||
+      !gps.date.isValid() || !gps.time.isValid() || gps.date.year() < 2024 ||
+      gps.date.age() > 2000 || gps.time.age() > 2000) return;
+  lastTelemetryAt = millis();
+  char measuredAt[25];
+  snprintf(measuredAt, sizeof(measuredAt), "%04d-%02d-%02dT%02d:%02d:%02dZ",
+           gps.date.year(), gps.date.month(), gps.date.day(),
+           gps.time.hour(), gps.time.minute(), gps.time.second());
+  JsonDocument record;
+  record["device_id"] = telemetryDevice;
+  record["stream_id"] = telemetryStream;
+  record["seq"] = telemetrySequence++;
+  record["measured_at"] = measuredAt;
+  record["latitude"] = gps.location.lat();
+  record["longitude"] = gps.location.lng();
+  // HDOP is dimensionless; do not mislabel it as a meter accuracy estimate.
+  record["gps_accuracy_m"] = nullptr;
+  if (gps.hdop.isValid() && gps.hdop.age() <= 2000) record["hdop"] = gps.hdop.hdop();
+  record["satellites"] = gps.satellites.value();
+  record["activity_seconds"] = 0;
+  record["coverage_seconds"] = 0;
+  record["interval_seconds"] = 15;
+  serializeJson(record, Serial);
+  Serial.println();
+}
+#endif
+
 void setup()
 {
   Serial.begin(115200);
@@ -401,6 +444,14 @@ void setup()
   Serial.println("L76K GNSS test");
   Serial.println("衛星詳細は10秒ごとに表示します。");
 
+#ifdef COWLOG_TELEMETRY
+  telemetryStream = esp_random();
+  const uint64_t chip = ESP.getEfuseMac();
+  char device[32];
+  snprintf(device,sizeof(device),"collar-%04X%08X",
+           static_cast<unsigned>(chip >> 32),static_cast<unsigned>(chip & 0xFFFFFFFF));
+  telemetryDevice = device;
+#else
   Serial.print("Wi-Fiへ接続しています");
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -420,6 +471,8 @@ void setup()
     Serial.println("GNSS測位は続行しますが、住所表示にはWi-Fiが必要です。");
   }
 
+#endif
+
   Serial.println("Waiting for a valid fix...");
   Serial.println("Keep the antenna connected and place it outdoors.");
 }
@@ -431,6 +484,9 @@ void loop()
     collectNmeaCharacter(character);
 
     if (gps.encode(character)) {
+#ifdef COWLOG_TELEMETRY
+      emitTelemetry();
+#else
       if (gps.location.isValid()) {
         static uint32_t lastPrintedSecond = UINT32_MAX;
         const uint32_t currentSecond =
@@ -447,6 +503,7 @@ void loop()
           lastFixMessage = millis();
         }
       }
+#endif
     }
   }
 

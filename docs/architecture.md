@@ -1,28 +1,25 @@
-# システム構成（試作案）
+# Cowlogの構成（2026-10-28更新）
+
+利用者と確認したデータ経路は **首輪 → AWS → アプリ**。アプリが首輪から直接データを取得する構成ではない。親機やLoRaを必須にしない。首輪からAWSへ到達する通信方式は、このリポジトリではまだ実装・接続確認できていない。
 
 ```mermaid
 flowchart LR
-  Collar[首輪\nGNSS・加速度・LoRa] -->|測定記録| Gateway[牧場の親機]
-  Gateway -->|HTTPS・まとめて再送可能| API[Python API・SQLite]
-  API -->|HTTPS| App[SwiftUI iOSアプリ]
+  Collar[首輪・固定ID] -->|測定データ・通信方式は未接続| AWS[AWSの受信処理・保存DB・API]
+  AWS -->|HTTPS・位置と活動量| App[Flutterアプリ]
+  App -->|HTTPS・固定IDに表示番号を設定| AWS
 ```
 
-## 各ディレクトリの役割
+番号の正本はサーバーの「固定ID → 表示番号」の対応。今回の保存APIはAWS等に配置するサーバー向けの実装であり、首輪本体へ番号を送信・書き込む処理ではない。ファームウェアへの設定送信・受信・保存・受領確認は未実装。
 
-| 場所 | 内容 |
-| --- | --- |
-| `firmware/collar/` | 首輪に搭載するマイコンのコード。GNSS、加速度センサー、LoRa送信を扱う。 |
-| `firmware/gateway/` | 親機のコード。LoRa受信、PC・サーバーとの通信を扱う。 |
-| `apps/mobile/` | SwiftUIアプリ。優先一覧、最新位置、日別経路、活動量、欠測表示。 |
-| `apps/api/` | SQLite保存、重複排除、優先判定、HTTPS接続を前提とした読み取りAPI。 |
-| `hardware/electronics/` | 配線図、回路図、ピン割り当て、部品表。 |
-| `hardware/enclosure/` | Fusionの設計データ、STL、印刷条件。 |
-| `docs/test-results/` | 測位、通信距離、消費電力、装着試験の結果。 |
+## 実装と未接続の境界
 
-## 現在の状態
+- Flutter: 優先一覧、カラー実地図、履歴、首輪・番号、HTTPS APIクライアント。
+- Python API + SQLite: ローカルで動くサーバー参考実装。計測受信、履歴、判定、首輪発見と番号設定。
+- AWS: 接続先、受信方式、DBサービス、認証、配置は未設定・未検証。DynamoDB/IoT Core/Lambdaなどを採用済みとは扱わない。
+- `firmware/collar`: 既存のGNSS実験とUSB JSON送信モード。AWS直接通信は未実装。
+- `firmware/gateway`: 旧USB実験用ツール。今回の運用で親機を必須にする根拠ではない。
+- 従来のSwiftUI版は保存しているが、今回の改修対象はFlutter版。
 
-`apps/mobile/` と `apps/api/` にサンプルデータで動く試作を作成済みです。WindowsでPythonテストとSwiftの構文確認を行いました。Xcodeでのビルド、首輪→親機→APIの実データ接続、クラウド公開は未実施です。
+AWS側が同じAPI契約を提供すれば、アプリはHTTPSの接続先を指定して利用できる。AWS上のDBへアプリが直接接続する構成ではない。AWSリソースや首輪の通信が完成したことを意味しない。
 
-## 共有するデータ形式
-
-親機からAPIへ送る項目と重複排除の方法は[データ仕様案](data-contract.md)を参照してください。首輪と親機の間の形式はハード側との調整事項です。
+詳細は [現行仕様](current-spec.md)、API境界は [データ契約](data-contract.md) を参照。
