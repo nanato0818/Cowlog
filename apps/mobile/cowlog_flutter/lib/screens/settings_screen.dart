@@ -29,14 +29,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _save() async {
+    FocusScope.of(context).unfocus();
     setState(() => _saving = true);
-    await widget.store.saveConnection(url: _url.text, token: _token.text);
-    _token.clear();
-    if (mounted) {
-      setState(() => _saving = false);
+    try {
+      await widget.store.saveConnection(url: _url.text, token: _token.text);
+      if (!mounted) return;
+      _token.clear();
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('接続情報を保存しました')));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('接続情報を保存できませんでした')));
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 
@@ -44,7 +52,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('接続設定')),
     body: ListView(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.fromLTRB(
+        16,
+        16,
+        16,
+        16 + MediaQuery.paddingOf(context).bottom,
+      ),
       children: [
         SwitchListTile(
           title: const Text('サンプルデータを使う'),
@@ -78,7 +91,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         FilledButton.icon(
           onPressed: _saving ? null : _save,
           icon: const Icon(Icons.save),
-          label: Text(_saving ? '保存中' : '接続情報を保存'),
+          label: AnimatedSwitcher(
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 160),
+            child: Text(_saving ? '保存中' : '接続情報を保存', key: ValueKey(_saving)),
+          ),
         ),
         const SizedBox(height: 12),
         Text(
