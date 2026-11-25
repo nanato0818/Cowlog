@@ -35,7 +35,13 @@ class DashboardScreen extends StatelessWidget {
     body: RefreshIndicator(
       onRefresh: store.refresh,
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          16 + MediaQuery.paddingOf(context).bottom,
+        ),
         children: [
           if (store.demoMode)
             const _Notice(
@@ -62,7 +68,10 @@ class DashboardScreen extends StatelessWidget {
               ),
               const SizedBox(height: 10),
             ],
-          ] else if (!store.isLoading)
+          ],
+          if ((store.dashboard?.cows.isEmpty ?? true) &&
+              !store.isLoading &&
+              store.errorMessage == null)
             const Padding(
               padding: EdgeInsets.only(top: 96),
               child: Center(child: Text('表示する牛がいません')),

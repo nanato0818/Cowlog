@@ -31,7 +31,11 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _history = null;
+      _error = null;
+    });
     try {
       final history = await widget.store.history(widget.cow.id, _date);
       if (mounted) {
@@ -129,18 +133,20 @@ class _DetailScreenState extends State<DetailScreen> {
                 ),
               ),
               TextButton.icon(
-                onPressed: () async {
-                  final picked = await showDatePicker(
-                    context: context,
-                    initialDate: _date,
-                    firstDate: DateTime(2025),
-                    lastDate: DateTime.now(),
-                  );
-                  if (picked != null) {
-                    setState(() => _date = picked);
-                    _load();
-                  }
-                },
+                onPressed: _loading
+                    ? null
+                    : () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: _date,
+                          firstDate: DateTime(2025),
+                          lastDate: DateTime.now(),
+                        );
+                        if (picked != null && mounted) {
+                          _date = picked;
+                          await _load();
+                        }
+                      },
                 icon: const Icon(Icons.calendar_today),
                 label: const Text('変更'),
               ),
@@ -159,90 +165,92 @@ class _DetailScreenState extends State<DetailScreen> {
                 style: const TextStyle(color: Colors.orange),
               ),
             ),
-          const SizedBox(height: 16),
-          Text('移動経路', style: Theme.of(context).textTheme.titleLarge),
-          if (positions.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Text('この日の位置記録はありません'),
-            )
-          else ...[
-            Padding(
-              padding: const EdgeInsets.only(top: 6, bottom: 8),
-              child: Text('参考移動距離: ${_distanceKm.toStringAsFixed(1)} km'),
-            ),
-            SizedBox(
-              height: 280,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: FlutterMap(
-                  options: MapOptions(
-                    initialCenter: positions.first,
-                    initialZoom: 14,
+          if (!_loading && _error == null) ...[
+            const SizedBox(height: 16),
+            Text('移動経路', style: Theme.of(context).textTheme.titleLarge),
+            if (positions.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Text('この日の位置記録はありません'),
+              )
+            else ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 6, bottom: 8),
+                child: Text('参考移動距離: ${_distanceKm.toStringAsFixed(1)} km'),
+              ),
+              SizedBox(
+                height: 280,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: FlutterMap(
+                    options: MapOptions(
+                      initialCenter: positions.first,
+                      initialZoom: 14,
+                    ),
+                    children: [
+                      TileLayer(
+                        urlTemplate:
+                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        userAgentPackageName: 'jp.ac.yuge.cowlog',
+                      ),
+                      PolylineLayer(
+                        polylines: [
+                          for (final segment in _segments)
+                            Polyline(
+                              points: segment,
+                              color: Colors.blue,
+                              strokeWidth: 3,
+                            ),
+                        ],
+                      ),
+                      MarkerLayer(
+                        markers: [
+                          Marker(
+                            point: positions.last,
+                            width: 44,
+                            height: 44,
+                            child: const Icon(
+                              Icons.location_pin,
+                              color: Colors.red,
+                              size: 38,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                  children: [
-                    TileLayer(
-                      urlTemplate:
-                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'jp.ac.yuge.cowlog',
-                    ),
-                    PolylineLayer(
-                      polylines: [
-                        for (final segment in _segments)
-                          Polyline(
-                            points: segment,
-                            color: Colors.blue,
-                            strokeWidth: 3,
-                          ),
-                      ],
-                    ),
-                    MarkerLayer(
-                      markers: [
-                        Marker(
-                          point: positions.last,
-                          width: 44,
-                          height: 44,
-                          child: const Icon(
-                            Icons.location_pin,
-                            color: Colors.red,
-                            size: 38,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
                 ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '距離は測位点を結んだ概算です。精度が100mを超える点と、1時間を超える空白はつなぎません。',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
-          const SizedBox(height: 24),
-          Text('行動量の推移', style: Theme.of(context).textTheme.titleLarge),
-          if (valid.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Text('この日の行動量記録はありません'),
-            )
-          else ...[
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 180,
-              child: CustomPaint(
-                painter: _ActivityPainter(
-                  valid.map((item) => item.activityRatio).toList(),
-                  Theme.of(context).colorScheme.primary,
-                ),
-                child: const SizedBox.expand(),
+              const SizedBox(height: 6),
+              Text(
+                '距離は測位点を結んだ概算です。精度が100mを超える点と、1時間を超える空白はつなぎません。',
+                style: Theme.of(context).textTheme.bodySmall,
               ),
-            ),
-            Text(
-              '活動率 = 動きがあった秒数 ÷ 測定できた秒数。測定できなかった時間は除外しています。',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
+            ],
+            const SizedBox(height: 24),
+            Text('行動量の推移', style: Theme.of(context).textTheme.titleLarge),
+            if (valid.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Text('この日の行動量記録はありません'),
+              )
+            else ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 180,
+                child: CustomPaint(
+                  painter: _ActivityPainter(
+                    valid.map((item) => item.activityRatio).toList(),
+                    Theme.of(context).colorScheme.primary,
+                  ),
+                  child: const SizedBox.expand(),
+                ),
+              ),
+              Text(
+                '活動率 = 動きがあった秒数 ÷ 測定できた秒数。測定できなかった時間は除外しています。',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
           ],
         ],
       ),
@@ -267,7 +275,8 @@ class _ActivityPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final baseline = size.height - 22;
-    final barWidth = math.max(2.0, size.width / values.length - 2);
+    final slotWidth = size.width / values.length;
+    final barWidth = slotWidth - math.min(2.0, slotWidth / 3);
     final paint = Paint()..color = color.withValues(alpha: .72);
     canvas.drawLine(
       Offset(0, baseline),
@@ -277,12 +286,7 @@ class _ActivityPainter extends CustomPainter {
     for (var i = 0; i < values.length; i++) {
       final height = (baseline - 8) * values[i].clamp(0, 1);
       canvas.drawRect(
-        Rect.fromLTWH(
-          i * (size.width / values.length),
-          baseline - height,
-          barWidth,
-          height,
-        ),
+        Rect.fromLTWH(i * slotWidth, baseline - height, barWidth, height),
         paint,
       );
     }
