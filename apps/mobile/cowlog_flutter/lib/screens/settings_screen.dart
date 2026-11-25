@@ -85,6 +85,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           decoration: const InputDecoration(
             labelText: '閲覧用トークン',
             helperText: '空欄のまま保存すると、すでに保存したトークンを維持します。',
+            helperMaxLines: 5,
           ),
         ),
         const SizedBox(height: 20),
