@@ -51,6 +51,7 @@ flutter build ios --simulator --debug
 
 | 日付 | 担当 | 内容 |
 |---|---|---|
+| 11/27 | Codex | 刷新版の下部ナビを、画面下の内容が透ける小ぶりなガラスのバーと淡い選択レンズに調整。地図上ではラベルのコントラストを保ち、v2 のレンズの動きも継続。優先一覧の状態フィルターは刷新版で折り返し、通常版で横スクロールの枠内に収める。flutter analyze 指摘なし・flutter test 59件成功。幅320・文字2倍で「データ不足」の表示と選択を確認。iOS シミュレーターは未確認。 |
 | 11/27 | Claude | 利用者の指示で、v2＋刷新UIの作業内容をコミットし nanato0818/Cowlog の `main` に push（今回だけの例外）。不要ファイルを削除：Codex依頼メモ `docs/codex-task-2026-11-1*.md`（5つ）・`docs/codex-3d-cow-request.md`、使っていない3D牛モデル `assets/models/*.glb`・`model_manifest.json`・`tools/generate_cow_models.py`・`tools/cow-model-requirements.txt`。削除前バックアップ `~/Desktop/Cowlog-backups/cowlog-20261127-1501-before-cleanup.tar.gz`。analyze 問題なし・test 58件成功。Hiiragi102/Cowlog（origin）には未push |
 | 11/27 | Claude | Codexの `Cowlog-v2-refresh-2026-11-27.patch` を `git apply --check` で確認（衝突なし）してから適用。analyze 問題なし・test 58件成功。iPhone 18 Pro で `flutter run --dart-define=COWLOG_UI_REFRESH=true` を実行し、刷新版のホーム（灰色の地・縁取りの白いカード・活動リング・電池・歩行バー・ナビの「設定」タブ）が表示され、起動ログに例外がないことを確認。スイッチやタブ切り替えの操作は未確認。コミット・pushなし |
 | 11/27 | Codex | 添付の v2 を土台に刷新 UI と `LiquidSwitch` を統合。両モードで v2 の活動リング、小さな電池表示、歩行ピクトグラム、タブのぼかしとレンズの浮き上がり・後ろ側の伸びを維持。刷新版は `--dart-define=COWLOG_UI_REFRESH=true` で起動し、首輪・番号は歯車の「設定」から管理する。flutter analyze 指摘なし・flutter test 58件成功。Linux で検証したため iOS シミュレーターは未確認。Mac 用の差分は v2 から作成。 |

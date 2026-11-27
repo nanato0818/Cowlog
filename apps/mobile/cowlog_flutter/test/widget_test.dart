@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:cowlog_flutter/app_theme.dart';
 import 'package:cowlog_flutter/main.dart';
 import 'package:cowlog_flutter/models.dart';
 import 'package:cowlog_flutter/screens/dashboard_screen.dart';
@@ -140,6 +141,57 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets(
+    'refreshed status filters fit a narrow layout at large text sizes',
+    (tester) async {
+      tester.view
+        ..physicalSize = const Size(320, 720)
+        ..devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final store = AppStore()..dashboard = DemoData.dashboard();
+      addTearDown(store.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => CowlogUi(
+            refreshed: true,
+            child: MediaQuery(
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: const TextScaler.linear(2)),
+              child: child!,
+            ),
+          ),
+          home: DashboardScreen(store: store),
+        ),
+      );
+
+      final filters = find.byKey(const ValueKey('dashboard-status-filters'));
+      final pills = find.descendant(of: filters, matching: find.byType(Pill));
+      final bounds = tester.getRect(filters).inflate(.01);
+      for (final element in pills.evaluate()) {
+        final pill = tester.getRect(find.byWidget(element.widget));
+        expect(bounds.contains(pill.topLeft), isTrue);
+        expect(bounds.contains(pill.bottomRight), isTrue);
+      }
+      final dataMissing = find.descendant(
+        of: filters,
+        matching: find.text('データ不足 1'),
+      );
+      expect(dataMissing, findsOneWidget);
+      expect(
+        tester.getTopLeft(dataMissing).dy,
+        greaterThan(tester.getTopLeft(pills.first).dy),
+      );
+      await tester.tap(dataMissing);
+      await tester.pumpAndSettle();
+      expect(find.text('1 / 8頭'), findsOneWidget);
+      expect(find.byType(CowCard), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 
   final nav = find.byKey(const ValueKey('app-navigation'));
   Finder tab(String label) =>

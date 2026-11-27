@@ -222,26 +222,43 @@ class _RootScreenState extends State<RootScreen>
     final labels = refreshed ? const ['ホーム', '優先一覧', '地図', '設定'] : _labels;
     final reduced = MediaQuery.disableAnimationsOf(context);
     final highContrast = MediaQuery.highContrastOf(context);
-    final labelSize = refreshed ? 12.0 : 11.0;
+    final sideInset = refreshed ? 22.0 : 18.0;
     final navHeight = math.max(
-      66.0,
-      38 + 2.2 * MediaQuery.textScalerOf(context).scale(labelSize),
+      refreshed ? 60.0 : 66.0,
+      38 + 2.2 * MediaQuery.textScalerOf(context).scale(_TabItem.labelSize),
     );
     final onMap = _index == 2;
     return Scaffold(
       extendBody: true,
-      body: _body(context),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          _body(context),
+          if (refreshed)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height:
+                  navHeight +
+                  MediaQuery.paddingOf(context).bottom +
+                  (onMap ? 32 : 50),
+              child: IgnorePointer(child: _NavigationEdge(onMap: onMap)),
+            ),
+        ],
+      ),
       bottomNavigationBar: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 4, 18, 10),
+          padding: EdgeInsets.fromLTRB(sideInset, 4, sideInset, 10),
           child: SizedBox(
             key: const ValueKey('app-navigation'),
             height: navHeight,
             child: Glass(
               radius: navHeight / 2,
-              backingOpacity: highContrast ? .85 : (onMap ? .62 : 0),
-              tinted: refreshed,
+              backingOpacity: highContrast
+                  ? .85
+                  : (onMap ? .62 : (refreshed ? .42 : 0)),
               padding: const EdgeInsets.all(5),
               clipContent: false,
               child: LayoutBuilder(
@@ -372,7 +389,6 @@ class _RootScreenState extends State<RootScreen>
                                               refreshed ||
                                               onMap ||
                                               highContrast,
-                                          labelSize: labelSize,
                                           pressed: _pressed == i ? press : 0,
                                         ),
                                       ),
@@ -425,20 +441,45 @@ class _RootScreenState extends State<RootScreen>
   }
 }
 
+/// Softens the content directly behind the floating navigation near the edge.
+class _NavigationEdge extends StatelessWidget {
+  const _NavigationEdge({required this.onMap});
+
+  final bool onMap;
+
+  @override
+  Widget build(BuildContext context) {
+    final surface = AppColors.refreshCanvas;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            surface.withValues(alpha: 0),
+            surface.withValues(alpha: onMap ? .18 : .72),
+            surface.withValues(alpha: onMap ? .52 : .92),
+          ],
+          stops: const [0, .48, 1],
+        ),
+      ),
+    );
+  }
+}
+
 class _TabItem extends StatelessWidget {
   const _TabItem({
     required this.icon,
     required this.label,
     required this.active,
     required this.strongContrast,
-    required this.labelSize,
     required this.pressed,
   });
   final IconData icon;
   final String label;
   final bool active;
   final bool strongContrast;
-  final double labelSize;
+  static const labelSize = 11.0;
   final double pressed;
   @override
   Widget build(BuildContext context) {
@@ -489,31 +530,26 @@ class _Lens extends StatelessWidget {
           end: Alignment.bottomCenter,
           colors: [
             // 持ち上げている間は透明なガラスに近づく。
-            Color.lerp(
-              refreshed
-                  ? AppColors.accentSoft
-                  : AppColors.surface.withValues(alpha: .18),
-              AppColors.surface.withValues(alpha: .08),
-              lift,
-            )!,
-            Color.lerp(
-              refreshed
-                  ? AppColors.surface
-                  : AppColors.surface.withValues(alpha: .04),
+            if (refreshed) ...[
+              AppColors.ink.withValues(alpha: .07 * (1 - lift)),
+              AppColors.ink.withValues(alpha: .1 * (1 - lift)),
+            ] else ...[
+              AppColors.surface.withValues(alpha: .18 - .10 * lift),
               AppColors.surface.withValues(alpha: .04),
-              lift,
-            )!,
+            ],
           ],
         ),
         border: Border.all(
-          color: AppColors.ink.withValues(alpha: .14 + .08 * lift),
-          width: 1 + .4 * lift,
+          color: AppColors.ink.withValues(
+            alpha: (refreshed ? .06 : .14) + .08 * lift,
+          ),
+          width: (refreshed ? .7 : 1) + .4 * lift,
         ),
         boxShadow: [
           BoxShadow(
             // 持ち上げている間の影はガラス玉の外側に描く（拡大で灰色にならないよう）。
             color: AppColors.ink.withValues(
-              alpha: .10 * (1 - lift) * (1 - lift),
+              alpha: (refreshed ? .04 : .10) * (1 - lift) * (1 - lift),
             ),
             blurRadius: 10 + 14 * lift,
             offset: Offset(0, 2 + 4 * lift),
@@ -521,21 +557,25 @@ class _Lens extends StatelessWidget {
         ],
       ),
       child: CustomPaint(
-        foregroundPainter: GlassRim(radius: radius, lift: lift),
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: FractionallySizedBox(
-            widthFactor: .64,
-            child: Container(
-              height: 1.2,
-              margin: const EdgeInsets.only(top: 1.5),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(1),
+        foregroundPainter: refreshed && lift < .02
+            ? null
+            : GlassRim(radius: radius, lift: lift),
+        child: refreshed && lift < .02
+            ? null
+            : Align(
+                alignment: Alignment.topCenter,
+                child: FractionallySizedBox(
+                  widthFactor: .64,
+                  child: Container(
+                    height: 1.2,
+                    margin: const EdgeInsets.only(top: 1.5),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(1),
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
-        ),
       ),
     );
   }

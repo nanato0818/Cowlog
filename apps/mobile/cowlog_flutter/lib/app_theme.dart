@@ -314,11 +314,13 @@ class Pill extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.leading,
+    this.horizontalPadding = 14,
   });
   final String label;
   final bool selected;
   final VoidCallback onTap;
   final Widget? leading;
+  final double horizontalPadding;
   @override
   Widget build(BuildContext context) => Semantics(
     button: true,
@@ -328,7 +330,12 @@ class Pill extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         constraints: const BoxConstraints(minHeight: 40),
-        padding: EdgeInsets.fromLTRB(leading == null ? 14 : 8, 6, 14, 6),
+        padding: EdgeInsets.fromLTRB(
+          leading == null ? horizontalPadding : 8,
+          6,
+          horizontalPadding,
+          6,
+        ),
         decoration: BoxDecoration(
           color: selected ? AppColors.ink : AppColors.surfaceHigh,
           borderRadius: BorderRadius.circular(99),

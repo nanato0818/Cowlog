@@ -40,6 +40,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
         .toList();
     final notice = store.isOffline ? 'オフライン' : store.errorMessage;
     final refreshed = CowlogUi.isRefreshed(context);
+    final filterPadding = refreshed ? 11.0 : 14.0;
+    final filters = [
+      Pill(
+        label: 'すべて',
+        horizontalPadding: filterPadding,
+        selected: _status == null,
+        onTap: () => setState(() => _status = null),
+      ),
+      for (final status in CowStatus.values)
+        if (status != CowStatus.unknown || all.any((c) => c.status == status))
+          Pill(
+            label:
+                '${status.label} ${all.where((c) => c.status == status).length}',
+            horizontalPadding: filterPadding,
+            selected: _status == status,
+            onTap: () =>
+                setState(() => _status = _status == status ? null : status),
+          ),
+    ];
     final controls = <Widget>[
       Row(
         children: [
@@ -66,37 +85,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
       const SizedBox(height: 8),
-      SizedBox(
-        height: refreshed ? 44 : 40,
-        child: ListView(
-          scrollDirection: Axis.horizontal,
-          clipBehavior: Clip.none,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: Pill(
-                label: 'すべて',
-                selected: _status == null,
-                onTap: () => setState(() => _status = null),
-              ),
-            ),
-            for (final s in CowStatus.values)
-              if (s != CowStatus.unknown || all.any((c) => c.status == s))
-                Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: Pill(
-                    label:
-                        '${s.label} ${all.where((c) => c.status == s).length}',
-                    selected: _status == s,
-                    onTap: () =>
-                        setState(() => _status = _status == s ? null : s),
-                  ),
-                ),
-          ],
+      if (refreshed)
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: Wrap(
+            key: const ValueKey('dashboard-status-filters'),
+            spacing: 6,
+            runSpacing: 6,
+            children: filters,
+          ),
+        )
+      else
+        SizedBox(
+          height: (MediaQuery.textScalerOf(context).scale(13) * 1.25 + 12)
+              .clamp(40.0, double.infinity),
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            clipBehavior: Clip.hardEdge,
+            itemCount: filters.length,
+            itemBuilder: (context, index) => filters[index],
+            separatorBuilder: (_, _) => const SizedBox(width: 6),
+          ),
         ),
-      ),
       const SizedBox(height: 6),
-      Row(
+      OverflowBar(
+        alignment: MainAxisAlignment.spaceBetween,
+        overflowAlignment: OverflowBarAlignment.end,
+        spacing: 8,
+        overflowSpacing: 4,
         children: [
           Text(
             '${cows.length} / ${all.length}頭',
@@ -106,11 +122,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               fontFeatures: tabularFigures,
             ),
           ),
-          if (notice != null) ...[
-            const SizedBox(width: 10),
-            Flexible(child: NoticeBadge(text: notice)),
-          ],
-          const Spacer(),
+          if (notice != null) NoticeBadge(text: notice),
           LiquidSwitch(
             label: '位置あり',
             value: _positionOnly,
@@ -135,7 +147,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Container(
                   padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
                   decoration: CowlogUi.panel(),
-                  child: Column(children: controls),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: controls,
+                  ),
                 )
               else
                 ...controls,
