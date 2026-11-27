@@ -6,6 +6,7 @@ import 'package:cowlog_flutter/farm_map.dart';
 import 'package:cowlog_flutter/state/app_store.dart';
 import 'package:cowlog_flutter/screens/map_screen.dart';
 import 'package:cowlog_flutter/models.dart';
+import 'package:cowlog_flutter/widgets/liquid_switch.dart';
 
 bool inside(List<LatLng> b, LatLng p) {
   bool result = false;
@@ -47,20 +48,22 @@ void main() {
       }
     }
   });
-  testWidgets(
-    'Aerial map remains visible without GPS, with no upper controls',
-    (tester) async {
-      final store = AppStore()
-        ..dashboard = Dashboard(generatedAt: DateTime.now(), cows: []);
-      await tester.pumpWidget(MaterialApp(home: MapScreen(store: store)));
-      expect(find.text('Cowlog'), findsNothing);
-      expect(
-        tester.widget<TileLayer>(find.byType(TileLayer)).urlTemplate,
-        contains('seamlessphoto'),
-      );
-      expect(find.byType(PolygonLayer), findsOneWidget);
-      expect(find.byType(MapControl), findsOneWidget); // 全頭の経路の切替ボタンのみ
-      await tester.pumpWidget(const SizedBox());
-    },
-  );
+  testWidgets('Aerial map keeps its route switch visible without GPS', (
+    tester,
+  ) async {
+    final store = AppStore()
+      ..dashboard = Dashboard(generatedAt: DateTime.now(), cows: []);
+    await tester.pumpWidget(MaterialApp(home: MapScreen(store: store)));
+    expect(find.text('Cowlog'), findsNothing);
+    expect(
+      tester.widget<TileLayer>(find.byType(TileLayer)).urlTemplate,
+      contains('seamlessphoto'),
+    );
+    expect(find.byType(PolygonLayer), findsOneWidget);
+    final routeSwitch = find.byType(LiquidSwitch);
+    expect(routeSwitch, findsOneWidget);
+    expect(tester.widget<LiquidSwitch>(routeSwitch).label, '全頭の経路');
+    expect(tester.widget<LiquidSwitch>(routeSwitch).value, isFalse);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

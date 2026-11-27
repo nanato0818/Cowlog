@@ -110,11 +110,18 @@ class _HerdScreenState extends State<HerdScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final refreshed = CowlogUi.isRefreshed(context);
     final busy = _loading || _saving;
     final canEdit = widget.store.canManageNumbers && !busy;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('首輪・番号'),
+        centerTitle: !refreshed,
+        title: Text(
+          refreshed ? '設定' : '首輪・番号',
+          style: refreshed
+              ? const TextStyle(fontSize: 24, fontWeight: FontWeight.w700)
+              : null,
+        ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(2),
           child: busy
@@ -127,24 +134,43 @@ class _HerdScreenState extends State<HerdScreen> {
             onPressed: busy ? null : _load,
             icon: const Icon(CupertinoIcons.arrow_clockwise),
           ),
-          IconButton(
-            tooltip: '首輪を追加',
-            onPressed: canEdit ? () => _submit(null) : null,
-            icon: const Icon(CupertinoIcons.add, size: 28),
-          ),
+          if (refreshed)
+            IconButton.filled(
+              tooltip: '首輪を追加',
+              onPressed: canEdit ? () => _submit(null) : null,
+              style: IconButton.styleFrom(
+                backgroundColor: AppColors.accent,
+                foregroundColor: AppColors.onInk,
+              ),
+              icon: const Icon(CupertinoIcons.add, size: 23),
+            )
+          else
+            IconButton(
+              tooltip: '首輪を追加',
+              onPressed: canEdit ? () => _submit(null) : null,
+              icon: const Icon(CupertinoIcons.add, size: 28),
+            ),
           const SizedBox(width: 6),
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 140),
+        padding: EdgeInsets.fromLTRB(20, refreshed ? 14 : 8, 20, 140),
         children: [
+          if (refreshed) ...[
+            const Text(
+              '首輪・番号',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+          ],
           Row(
             children: [
               if (_collars != null)
                 Text(
                   '${_collars!.length}台の首輪',
-                  style: const TextStyle(
-                    fontSize: 13,
+                  style: TextStyle(
+                    fontSize: refreshed ? 15 : 13,
+                    fontWeight: refreshed ? FontWeight.w600 : null,
                     color: AppColors.muted,
                     fontFeatures: tabularFigures,
                   ),
@@ -178,7 +204,7 @@ class _HerdScreenState extends State<HerdScreen> {
                 ),
               ),
             ),
-          const SizedBox(height: 6),
+          SizedBox(height: refreshed ? 12 : 6),
           for (final collar in _collars ?? <Collar>[])
             Pressable(
               onTap: canEdit ? () => _submit(collar) : null,
@@ -198,7 +224,9 @@ class _HerdScreenState extends State<HerdScreen> {
                             Text(
                               collar.number ?? '番号未設定',
                               style: TextStyle(
-                                fontSize: collar.number == null ? 17 : 22,
+                                fontSize: collar.number == null
+                                    ? 17
+                                    : (refreshed ? 25 : 22),
                                 fontWeight: FontWeight.w700,
                                 fontFeatures: tabularFigures,
                                 color: collar.number == null
@@ -318,8 +346,8 @@ class _CollarEditorState extends State<_CollarEditor> {
                   widget.collar == null ? '首輪を追加' : widget.collar!.deviceId,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 17,
+                  style: TextStyle(
+                    fontSize: CowlogUi.isRefreshed(context) ? 21 : 17,
                     fontWeight: FontWeight.w700,
                   ),
                 ),

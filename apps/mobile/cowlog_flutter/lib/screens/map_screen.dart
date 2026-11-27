@@ -1,9 +1,9 @@
-import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../app_theme.dart';
+import '../widgets/liquid_switch.dart';
 import '../activity_summary.dart';
 import '../route_segments.dart';
 import '../state/app_store.dart';
@@ -101,6 +101,7 @@ class _MapScreenState extends State<MapScreen> {
 
   Widget _content(BuildContext context) {
     final store = widget.store;
+    final refreshed = CowlogUi.isRefreshed(context);
     final now = DateTime.now();
     final cows =
         store.dashboard?.cows
@@ -280,27 +281,29 @@ class _MapScreenState extends State<MapScreen> {
             SafeArea(
               bottom: false,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+                padding: EdgeInsets.fromLTRB(refreshed ? 116 : 18, 10, 18, 0),
                 child: Align(
                   alignment: Alignment.topRight,
-                  child: Stack(
-                    alignment: Alignment.center,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      MapControl(
-                        icon: _routeMode
-                            ? CupertinoIcons.location
-                            : CupertinoIcons.map_pin_ellipse,
-                        label: _routeMode ? '現在位置' : '全頭の経路',
-                        onTap: _toggleRoutes,
+                      LiquidSwitch(
+                        label: '全頭の経路',
+                        value: _routeMode,
+                        onChanged: (_) => _toggleRoutes(),
+                        onImagery: true,
                       ),
                       if (_routeLoading)
-                        const IgnorePointer(
+                        const Padding(
+                          padding: EdgeInsets.only(top: 6, right: 14),
                           child: SizedBox(
-                            width: 46,
-                            height: 46,
+                            width: 18,
+                            height: 18,
                             child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
+                              strokeWidth: 2,
                               color: AppColors.accent,
+                              semanticsLabel: '経路を読み込み中',
                             ),
                           ),
                         ),
@@ -311,14 +314,15 @@ class _MapScreenState extends State<MapScreen> {
             ),
             if (cows.isNotEmpty)
               Positioned(
-                left: 28,
-                right: 28,
-                bottom: bottom + 8,
+                left: refreshed ? 18 : 28,
+                right: refreshed ? 18 : 28,
+                bottom: bottom + (refreshed ? 12 : 8),
                 child: SizedBox(
                   key: const ValueKey('map-cow-selector'),
-                  height: 48,
+                  height: refreshed ? 52 : 48,
                   child: Glass(
-                    radius: 24,
+                    radius: refreshed ? 26 : 24,
+                    tinted: refreshed,
                     child: ListView.builder(
                       scrollDirection: Axis.horizontal,
                       padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -345,9 +349,11 @@ class _MapScreenState extends State<MapScreen> {
                               const SizedBox(width: 7),
                               Text(
                                 cows[i].displayNumber,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 15,
+                                style: TextStyle(
+                                  fontWeight: refreshed
+                                      ? FontWeight.w700
+                                      : FontWeight.w600,
+                                  fontSize: refreshed ? 16 : 15,
                                   color: AppColors.ink,
                                   fontFeatures: tabularFigures,
                                 ),

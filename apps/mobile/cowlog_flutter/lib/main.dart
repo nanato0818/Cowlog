@@ -10,14 +10,25 @@ import 'app_theme.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   final store = AppStore();
-  runApp(CowlogApp(store: store));
+  runApp(
+    CowlogApp(
+      store: store,
+      refreshUi: const bool.fromEnvironment('COWLOG_UI_REFRESH'),
+    ),
+  );
   unawaited(store.initialize());
 }
 
 class CowlogApp extends StatelessWidget {
-  const CowlogApp({super.key, required this.store, this.showStartup = false});
+  const CowlogApp({
+    super.key,
+    required this.store,
+    this.showStartup = false,
+    this.refreshUi = false,
+  });
   final AppStore store;
   final bool showStartup;
+  final bool refreshUi;
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'Cowlog',
@@ -34,7 +45,9 @@ class CowlogApp extends StatelessWidget {
         outline: AppColors.line,
         surfaceTint: Colors.transparent,
       ),
-      scaffoldBackgroundColor: AppColors.background,
+      scaffoldBackgroundColor: refreshUi
+          ? AppColors.refreshCanvas
+          : AppColors.background,
       splashFactory: NoSplash.splashFactory,
       highlightColor: const Color(0x0f000000),
       pageTransitionsTheme: const PageTransitionsTheme(
@@ -43,8 +56,10 @@ class CowlogApp extends StatelessWidget {
           TargetPlatform.android: CupertinoPageTransitionsBuilder(),
         },
       ),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: AppColors.background,
+      appBarTheme: AppBarTheme(
+        backgroundColor: refreshUi
+            ? AppColors.refreshCanvas
+            : AppColors.background,
         foregroundColor: AppColors.ink,
         surfaceTintColor: Colors.transparent,
         centerTitle: true,
@@ -58,15 +73,20 @@ class CowlogApp extends StatelessWidget {
         ),
       ),
       cardTheme: CardThemeData(
-        elevation: 3,
+        elevation: refreshUi ? 0 : 3,
         shadowColor: const Color(0x14000000),
         color: AppColors.surface,
         margin: const EdgeInsets.symmetric(vertical: 5),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(refreshUi ? 22 : 28),
+          side: refreshUi
+              ? const BorderSide(color: AppColors.refreshDivider)
+              : BorderSide.none,
+        ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: AppColors.surfaceHigh,
+        fillColor: refreshUi ? AppColors.surface : AppColors.surfaceHigh,
         hintStyle: const TextStyle(color: AppColors.muted),
         prefixIconColor: AppColors.muted,
         border: OutlineInputBorder(
@@ -75,7 +95,9 @@ class CowlogApp extends StatelessWidget {
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(18),
-          borderSide: BorderSide.none,
+          borderSide: refreshUi
+              ? const BorderSide(color: AppColors.refreshDivider)
+              : BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(18),
@@ -105,10 +127,24 @@ class CowlogApp extends StatelessWidget {
         ),
       ),
       dividerColor: AppColors.line,
-      bottomSheetTheme: const BottomSheetThemeData(
-        backgroundColor: AppColors.surface,
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: refreshUi
+            ? AppColors.refreshCanvas
+            : AppColors.surface,
         surfaceTintColor: Colors.transparent,
+        shape: refreshUi
+            ? const RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              )
+            : null,
       ),
+      datePickerTheme: refreshUi
+          ? const DatePickerThemeData(
+              backgroundColor: AppColors.surface,
+              headerBackgroundColor: AppColors.refreshCanvas,
+              todayBorder: BorderSide(color: AppColors.accent),
+            )
+          : null,
       dialogTheme: const DialogThemeData(
         backgroundColor: AppColors.surface,
         surfaceTintColor: Colors.transparent,
@@ -163,7 +199,7 @@ class CowlogApp extends StatelessWidget {
     ),
     builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.dark,
-      child: child!,
+      child: CowlogUi(refreshed: refreshUi, child: child!),
     ),
     home: showStartup
         ? StartupScreen(child: RootScreen(store: store))

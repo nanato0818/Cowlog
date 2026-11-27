@@ -6,8 +6,10 @@ import 'package:latlong2/latlong.dart';
 import '../models.dart';
 import '../farm_map.dart';
 import '../app_theme.dart';
+import '../widgets/liquid_switch.dart';
 import '../activity_summary.dart';
 import '../widgets/activity_charts.dart';
+import '../widgets/cow_avatar.dart';
 import '../route_segments.dart';
 import '../state/app_store.dart';
 import 'dashboard_screen.dart';
@@ -138,6 +140,7 @@ class _DetailScreenState extends State<DetailScreen> {
             .where((c) => c.id == widget.cow.id)
             .firstOrNull ??
         widget.cow;
+    final refreshed = CowlogUi.isRefreshed(context);
     final points =
         _history?.measurements.where((m) => m.hasUsableCoordinate).toList() ??
         <Measurement>[];
@@ -149,7 +152,59 @@ class _DetailScreenState extends State<DetailScreen> {
         : (_failed || _partial)
         ? '一部未取得'
         : null;
-    const heading = TextStyle(fontSize: 14, fontWeight: FontWeight.w600);
+    final heading = TextStyle(
+      fontSize: refreshed ? 17 : 14,
+      fontWeight: refreshed ? FontWeight.w700 : FontWeight.w600,
+    );
+    final identity = Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        if (refreshed) ...[
+          CowAvatar(style: cow.style, size: 48),
+          const SizedBox(width: 10),
+        ],
+        Expanded(
+          child: Text(
+            cow.displayNumber,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 40,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -1,
+              fontFeatures: tabularFigures,
+            ),
+          ),
+        ),
+        if (cow.batteryPercent != null) ...[
+          const Icon(
+            CupertinoIcons.battery_75_percent,
+            size: 19,
+            color: AppColors.muted,
+          ),
+          Text(
+            '${cow.batteryPercent}%',
+            style: const TextStyle(
+              fontSize: 14,
+              color: AppColors.muted,
+              fontFeatures: tabularFigures,
+            ),
+          ),
+          const SizedBox(width: 12),
+        ],
+        StatusLabel(
+          text: cow.status.label,
+          urgent:
+              cow.status == CowStatus.check || cow.status == CowStatus.unknown,
+        ),
+      ],
+    );
+    final aerialSwitch = LiquidSwitch(
+      label: '航空写真',
+      value: _aerial,
+      onChanged: (value) => setState(() => _aerial = value),
+      onImagery: refreshed,
+    );
     return Scaffold(
       appBar: AppBar(
         actions: [
@@ -169,48 +224,16 @@ class _DetailScreenState extends State<DetailScreen> {
         ),
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 40),
+        padding: EdgeInsets.fromLTRB(20, refreshed ? 8 : 0, 20, 40),
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(
-                child: Text(
-                  cow.displayNumber,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 40,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -1,
-                    fontFeatures: tabularFigures,
-                  ),
-                ),
-              ),
-              if (cow.batteryPercent != null) ...[
-                const Icon(
-                  CupertinoIcons.battery_75_percent,
-                  size: 19,
-                  color: AppColors.muted,
-                ),
-                Text(
-                  '${cow.batteryPercent}%',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: AppColors.muted,
-                    fontFeatures: tabularFigures,
-                  ),
-                ),
-                const SizedBox(width: 12),
-              ],
-              StatusLabel(
-                text: cow.status.label,
-                urgent:
-                    cow.status == CowStatus.check ||
-                    cow.status == CowStatus.unknown,
-              ),
-            ],
-          ),
+          if (refreshed)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: CowlogUi.panel(),
+              child: identity,
+            )
+          else
+            identity,
           const SizedBox(height: 10),
           Row(
             children: [
@@ -271,7 +294,7 @@ class _DetailScreenState extends State<DetailScreen> {
                         color: AppColors.accent,
                       ),
                       const SizedBox(width: 6),
-                      const Text('経路', style: heading),
+                      Text('経路', style: heading),
                       const SizedBox(width: 10),
                       Text(
                         points.isEmpty
@@ -305,24 +328,29 @@ class _DetailScreenState extends State<DetailScreen> {
                 ),
                 SizedBox(
                   height: 290,
-                  child: RouteMapCanvas(
-                    key: ValueKey('route-${_history?.date}'),
-                    records: _history?.measurements ?? [],
-                    selected: selected,
-                    aerial: _aerial,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      RouteMapCanvas(
+                        key: ValueKey('route-${_history?.date}'),
+                        records: _history?.measurements ?? [],
+                        selected: selected,
+                        aerial: _aerial,
+                      ),
+                      if (refreshed)
+                        PositionedDirectional(
+                          start: 10,
+                          top: 10,
+                          child: aerialSwitch,
+                        ),
+                    ],
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 4, 18, 0),
+                  padding: EdgeInsets.fromLTRB(10, refreshed ? 12 : 4, 18, 0),
                   child: Row(
                     children: [
-                      TextButton(
-                        onPressed: () => setState(() => _aerial = !_aerial),
-                        child: Text(
-                          _aerial ? '地図' : '航空写真',
-                          style: const TextStyle(fontSize: 14),
-                        ),
-                      ),
+                      if (!refreshed) Flexible(child: aerialSwitch),
                       const Spacer(),
                       Text(
                         selected == null
@@ -474,6 +502,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   int? _index;
   @override
   Widget build(BuildContext context) {
+    final refreshed = CowlogUi.isRefreshed(context);
     final records = widget.history?.measurements ?? [];
     final points = records.where((m) => m.hasUsableCoordinate).toList();
     final index = (_index ?? points.length - 1).clamp(
@@ -504,34 +533,48 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                     onTap: () => Navigator.pop(context),
                   ),
                   const SizedBox(width: 10),
-                  Glass(
-                    radius: 23,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 11,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          widget.cow.displayNumber,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            fontFeatures: tabularFigures,
+                  Flexible(
+                    flex: 3,
+                    child: Glass(
+                      radius: 23,
+                      tinted: refreshed,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 11,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              widget.cow.displayNumber,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                fontFeatures: tabularFigures,
+                              ),
+                            ),
                           ),
-                        ),
-                        if (widget.demo) ...[
-                          const SizedBox(width: 8),
-                          const DemoBadge(),
+                          if (widget.demo) ...[
+                            const SizedBox(width: 8),
+                            const DemoBadge(),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
                   ),
                   const Spacer(),
                   MapControl(
-                    icon: CupertinoIcons.layers_alt,
-                    label: '地図切替',
+                    icon: refreshed
+                        ? (_aerial
+                              ? CupertinoIcons.map
+                              : CupertinoIcons.layers_alt)
+                        : CupertinoIcons.layers_alt,
+                    label: refreshed
+                        ? (_aerial ? '地図に切り替え' : '航空写真に切り替え')
+                        : '地図切替',
                     onTap: () => setState(() => _aerial = !_aerial),
                   ),
                 ],
@@ -546,6 +589,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                 padding: const EdgeInsets.all(20),
                 child: Glass(
                   radius: 26,
+                  tinted: refreshed,
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                     child: Column(

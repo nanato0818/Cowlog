@@ -43,16 +43,22 @@ class AppColors {
   static const glowA = Color(0xffe8665b);
   static const glowB = Color(0xffc93a31);
 
+  /// スイッチのオフ色と、航空写真上のラベルの背景・影。
+  static const switchOff = Color(0xffe5e5ea);
+  static const switchMapSurface = Color(0xf5ffffff);
+  static const switchMapShadow = Color(0x47000000);
+
   /// グラフ：コンセプト色の同系色でまとめる。
   static const ringActive = accent;
   static const ringInactive = Color(0xfff0c3b7);
   static const ringTrack = surfaceHigh;
   static const barIdle = Color(0xffeadfd9);
 
-  // ホームの3つのゲージはコンセプト色で統一（電池30%以下も同色、数字で区別）。
-  static const gaugeBattery = ringActive;
-  static const gaugeActivity = ringActive;
-  static const gaugeDistance = ringActive;
+  /// 刷新版の情報面と操作部の色。
+  static const refreshCanvas = Color(0xfff3f4f6);
+  static const refreshStageEdge = Color(0xffe9ebee);
+  static const refreshDivider = Color(0xffe1e4e8);
+  static const refreshGlass = Color(0xfff8f9fa);
 
   /// 区画線（仕様の黄色系を維持）。
   static const boundary = Color(0xffc69650);
@@ -62,6 +68,27 @@ class AppColors {
     end: Alignment.bottomRight,
     colors: [glowA, glowB],
   );
+}
+
+/// The app keeps the current layout as the default while the refresh is reviewed.
+class CowlogUi extends InheritedWidget {
+  const CowlogUi({super.key, required this.refreshed, required super.child});
+
+  final bool refreshed;
+
+  static bool isRefreshed(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<CowlogUi>()?.refreshed ??
+      false;
+
+  static BoxDecoration panel({double radius = 22}) => BoxDecoration(
+    color: AppColors.surface,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: AppColors.refreshDivider),
+  );
+
+  @override
+  bool updateShouldNotify(CowlogUi oldWidget) =>
+      refreshed != oldWidget.refreshed;
 }
 
 /// 桁がずれない数字。番号・％・時刻に使う。
@@ -110,17 +137,79 @@ class Glass extends StatelessWidget {
     this.padding = EdgeInsets.zero,
     this.shadow = true,
     this.lift = 0,
+    this.backingOpacity = 0,
+    this.clipContent = true,
+    this.tinted = false,
   });
   final Widget child;
   final double radius;
   final EdgeInsetsGeometry padding;
   final bool shadow;
+  final bool tinted;
 
   /// 押している間の持ち上がり（0〜1）。縁の光と表面の白が強くなる。
   final double lift;
+
+  /// 写真など複雑な背景で、前景のコントラストを保つために足す白。
+  final double backingOpacity;
+
+  /// The navigation lens can rise above the capsule while the glass stays clipped.
+  final bool clipContent;
+
+  double _surfaceAlpha(double alpha, double tintedMinimum) => math.max(
+    alpha + backingOpacity * (1 - alpha),
+    tinted ? tintedMinimum : 0,
+  );
+
   @override
   Widget build(BuildContext context) {
     final shape = BorderRadius.circular(radius);
+    final surface = tinted ? AppColors.refreshGlass : AppColors.surface;
+    final content = Padding(
+      padding: padding,
+      child: DefaultTextStyle.merge(
+        style: const TextStyle(shadows: glassContentShadows),
+        child: IconTheme.merge(
+          data: const IconThemeData(shadows: glassContentShadows),
+          child: child,
+        ),
+      ),
+    );
+    final backdrop = ClipRRect(
+      borderRadius: shape,
+      child: BackdropFilter(
+        filter: ImageFilter.compose(
+          outer: ImageFilter.compose(
+            outer: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+            inner: ImageFilter.matrix(
+              (Matrix4.identity()..setTranslationRaw(.6, -.4, 0)).storage,
+            ),
+          ),
+          inner: const ColorFilter.matrix(_saturate),
+        ),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: shape,
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                surface.withValues(alpha: _surfaceAlpha(.14 + .16 * lift, .86)),
+                surface.withValues(alpha: _surfaceAlpha(.05 + .06 * lift, .68)),
+              ],
+            ),
+            border: Border.all(
+              color: AppColors.ink.withValues(alpha: .16),
+              width: 1,
+            ),
+          ),
+          child: CustomPaint(
+            foregroundPainter: GlassRim(radius: radius, lift: lift),
+            child: clipContent ? content : const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: shape,
@@ -134,50 +223,15 @@ class Glass extends StatelessWidget {
               ]
             : null,
       ),
-      child: ClipRRect(
-        borderRadius: shape,
-        child: BackdropFilter(
-          filter: ImageFilter.compose(
-            outer: ImageFilter.compose(
-              outer: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
-              inner: ImageFilter.matrix(
-                (Matrix4.identity()..setTranslationRaw(.6, -.4, 0)).storage,
-              ),
+      child: clipContent
+          ? backdrop
+          : Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned.fill(child: backdrop),
+                content,
+              ],
             ),
-            inner: const ColorFilter.matrix(_saturate),
-          ),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: shape,
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.white.withValues(alpha: .14 + .16 * lift),
-                  Colors.white.withValues(alpha: .05 + .06 * lift),
-                ],
-              ),
-              border: Border.all(
-                color: AppColors.ink.withValues(alpha: .16),
-                width: 1,
-              ),
-            ),
-            child: CustomPaint(
-              foregroundPainter: GlassRim(radius: radius, lift: lift),
-              child: Padding(
-                padding: padding,
-                child: DefaultTextStyle.merge(
-                  style: const TextStyle(shadows: glassContentShadows),
-                  child: IconTheme.merge(
-                    data: const IconThemeData(shadows: glassContentShadows),
-                    child: child,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -359,81 +413,50 @@ class LiveCard extends StatelessWidget {
   final Widget? trailing;
   final EdgeInsetsGeometry padding;
   @override
-  Widget build(BuildContext context) => Container(
-    padding: padding,
-    decoration: BoxDecoration(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(28),
-      boxShadow: AppColors.cardShadow,
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (title != null) ...[
-          Row(
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: 16, color: AppColors.accent),
-                const SizedBox(width: 6),
-              ],
-              Expanded(
-                child: Text(
-                  title!,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  // Apple の文字サイズ規則の Subheadline（15pt）を太めに。
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: -.2,
-                    color: AppColors.ink,
+  Widget build(BuildContext context) {
+    final refreshed = CowlogUi.isRefreshed(context);
+    return Container(
+      padding: padding,
+      decoration: refreshed
+          ? CowlogUi.panel()
+          : BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(28),
+              boxShadow: AppColors.cardShadow,
+            ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (title != null) ...[
+            Row(
+              children: [
+                if (icon != null) ...[
+                  Icon(icon, size: 16, color: AppColors.accent),
+                  const SizedBox(width: 6),
+                ],
+                Expanded(
+                  child: Text(
+                    title!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    // Apple の文字サイズ規則の Subheadline（15pt）を太めに。
+                    style: TextStyle(
+                      fontSize: refreshed ? 17 : 15,
+                      fontWeight: refreshed ? FontWeight.w700 : FontWeight.w600,
+                      letterSpacing: -.2,
+                      color: AppColors.ink,
+                    ),
                   ),
                 ),
-              ),
-              ?trailing,
-            ],
-          ),
-          const SizedBox(height: 14),
-        ],
-        child,
-      ],
-    ),
-  );
-}
-
-/// 小さな区切りが並ぶゲージ（充電表示のような段階バー）。
-class SegmentGauge extends StatelessWidget {
-  const SegmentGauge({
-    super.key,
-    required this.ratio,
-    this.segments = 12,
-    this.height = 6,
-    this.color = AppColors.accent,
-  });
-  final double? ratio;
-  final int segments;
-  final double height;
-  final Color color;
-  @override
-  Widget build(BuildContext context) {
-    final lit = ratio == null ? 0 : (ratio!.clamp(0.0, 1.0) * segments).round();
-    return Row(
-      children: [
-        for (var i = 0; i < segments; i++) ...[
-          if (i > 0) const SizedBox(width: 2.5),
-          Expanded(
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 260),
-              height: height,
-              decoration: BoxDecoration(
-                color: i < lit ? color : AppColors.surfaceHigh,
-                borderRadius: BorderRadius.circular(height),
-              ),
+                ?trailing,
+              ],
             ),
-          ),
+            const SizedBox(height: 14),
+          ],
+          child,
         ],
-      ],
+      ),
     );
   }
 }
@@ -487,7 +510,10 @@ class _PressableState extends State<Pressable>
         child: AnimatedBuilder(
           animation: _c,
           builder: (context, child) => Transform.scale(
-            scale: 1 - (1 - widget.scale) * _c.value,
+            scale: MediaQuery.disableAnimationsOf(context)
+                ? 1
+                : 1 - (1 - widget.scale) * _c.value,
+            transformHitTests: false,
             child: child,
           ),
           child: widget.child,
@@ -541,10 +567,12 @@ class _GlassButtonState extends State<GlassButton>
 
   @override
   Widget build(BuildContext context) {
+    final enabled = widget.onTap != null;
+    final refreshed = CowlogUi.isRefreshed(context);
     Widget button = Listener(
-      onPointerDown: (_) => _to(1, AppleSpring.snappy),
-      onPointerUp: (_) => _to(0, AppleSpring.bouncy),
-      onPointerCancel: (_) => _to(0, AppleSpring.bouncy),
+      onPointerDown: enabled ? (_) => _to(1, AppleSpring.snappy) : null,
+      onPointerUp: enabled ? (_) => _to(0, AppleSpring.bouncy) : null,
+      onPointerCancel: enabled ? (_) => _to(0, AppleSpring.bouncy) : null,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: widget.onTap,
@@ -553,9 +581,11 @@ class _GlassButtonState extends State<GlassButton>
           builder: (context, child) {
             final v = _c.value.clamp(0.0, 1.2);
             return Transform.scale(
-              scale: 1 + .12 * v,
+              scale: MediaQuery.disableAnimationsOf(context) ? 1 : 1 + .12 * v,
+              transformHitTests: false,
               child: Glass(
                 radius: widget.radius,
+                tinted: refreshed,
                 padding: widget.padding,
                 lift: v.clamp(0.0, 1.0),
                 child: child!,
@@ -572,8 +602,17 @@ class _GlassButtonState extends State<GlassButton>
       ),
     );
     if (widget.tooltip != null) {
-      button = Tooltip(message: widget.tooltip!, child: button);
+      button = Tooltip(
+        message: widget.tooltip!,
+        excludeFromSemantics: refreshed,
+        child: button,
+      );
     }
-    return Semantics(button: true, label: widget.tooltip, child: button);
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: widget.tooltip,
+      child: button,
+    );
   }
 }

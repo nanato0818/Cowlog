@@ -2,7 +2,7 @@
 
 この文書は、Codex と Claude Code のどちらでこのフォルダを開いても、前回中断したところから同じように作業を再開するための共通メモです。**作業を始める前に必ず読み、作業を終える前に必ず更新してください。**
 
-- 最終更新：2026-11-25（Claude）
+- 最終更新：2026-11-27（Claude）
 - 対象フォルダ：`/Users/murakami/Desktop/Cowlog-Flutter`
 - 作業リポジトリ：**https://github.com/Hiiragi102/Cowlog**（非公開、`main`）。ローカルの `origin` はここ。旧リポジトリ nanato0818/Cowlog は `nanato` という名前のリモートとして残している（push しない）
 
@@ -23,8 +23,8 @@
 ### デザイン
 - 画面にロゴ・説明文・注意書き・大きな装飾を出さない。**見やすさ最優先**
 - コンセプト色は `#D9473D`（`AppColors.accent`）。色は `lib/app_theme.dart` の `AppColors` に名前付きで定義し、画面に16進数を直書きしない
-- グラフ・ゲージはコンセプト色とその同系色で統一（ホームの3つのゲージもコンセプト色）
-- 下部ナビは透き通ったリキッドグラス。移動中・押下中にレンズが少し膨らむ
+- グラフ・移動距離のバーはコンセプト色とその同系色で統一
+- 下部ナビはピル型のリキッドグラス。レンズは移動中・押下中に膨らみ、移動中は後ろ側が細く伸びる
 - 動きはiPhone標準アプリのような、わずかに弾む滑らかなもの
 - 牛の絵は「3DCG風の普通の牛」。画像生成で作った静止画（`assets/models/cow_*.png`）。3Dモデルを組み立てる方式はやめた
 
@@ -51,6 +51,15 @@ flutter build ios --simulator --debug
 
 | 日付 | 担当 | 内容 |
 |---|---|---|
+| 11/27 | Claude | 利用者の指示で、v2＋刷新UIの作業内容をコミットし nanato0818/Cowlog の `main` に push（今回だけの例外）。不要ファイルを削除：Codex依頼メモ `docs/codex-task-2026-11-1*.md`（5つ）・`docs/codex-3d-cow-request.md`、使っていない3D牛モデル `assets/models/*.glb`・`model_manifest.json`・`tools/generate_cow_models.py`・`tools/cow-model-requirements.txt`。削除前バックアップ `~/Desktop/Cowlog-backups/cowlog-20261127-1501-before-cleanup.tar.gz`。analyze 問題なし・test 58件成功。Hiiragi102/Cowlog（origin）には未push |
+| 11/27 | Claude | Codexの `Cowlog-v2-refresh-2026-11-27.patch` を `git apply --check` で確認（衝突なし）してから適用。analyze 問題なし・test 58件成功。iPhone 18 Pro で `flutter run --dart-define=COWLOG_UI_REFRESH=true` を実行し、刷新版のホーム（灰色の地・縁取りの白いカード・活動リング・電池・歩行バー・ナビの「設定」タブ）が表示され、起動ログに例外がないことを確認。スイッチやタブ切り替えの操作は未確認。コミット・pushなし |
+| 11/27 | Codex | 添付の v2 を土台に刷新 UI と `LiquidSwitch` を統合。両モードで v2 の活動リング、小さな電池表示、歩行ピクトグラム、タブのぼかしとレンズの浮き上がり・後ろ側の伸びを維持。刷新版は `--dart-define=COWLOG_UI_REFRESH=true` で起動し、首輪・番号は歯車の「設定」から管理する。flutter analyze 指摘なし・flutter test 58件成功。Linux で検証したため iOS シミュレーターは未確認。Mac 用の差分は v2 から作成。 |
+| 11/27 | Claude | Codexの `Cowlog-2026-11-27.patch`（刷新UI・`LiquidSwitch`）は 14dd25b から作られていて 11/25 の v2 を含まず、9ファイル20か所で衝突したため未適用。利用者の判断で Codex に作り直しを依頼。作業フォルダは「14dd25b ＋ v2（`cowlog-ui-14dd25b.patch`）」に戻した（Claude の `GlassSwitch` は削除、それを使っていた3画面も v2 の状態）。analyze 問題なし・test 52件成功・iOSシミュレータービルド成功。戻す前の状態は `~/Desktop/Cowlog-backups/cowlog-20261127-*-before-1127-patch.*`。Codex 用の土台の差分は `~/Downloads/Cowlog-base-v2-2026-11-27.diff`。コミット・pushなし |
+| 11/27 | Claude | リキッドグラスのスイッチ `GlassSwitch`（`lib/widgets/glass_switch.dart`）を追加。触れるとつまみが透明な水滴のガラスになって少しふくらみ（縁で下を屈折・ぼかし、鏡面の光）、動かすと速度に応じて進行方向へ伸び（面積は保つ）、離すと .bouncy で揺れて白に戻る。ドラッグ・端のゴム抵抗・触覚・モーション軽減に対応。優先一覧「位置あり」、地図「全頭の経路」、詳細「航空写真」をスイッチに置き換え（地図上は見出し付きガラスのピル `GlassSwitchChip`）。test 3件追加で計55件成功、analyze・iOSビルド成功。シミュレーターの録画でガラス化と赤い地への変化を確認したが、同じシミュレーターを別セッションが操作していて画面が勝手に切り替わり、オンへの切り替えと着地の揺れは目視確認できていない。作業前バックアップ `~/Desktop/Cowlog-backups/*-before-glass-switch.tar.gz`。コミット・pushなし |
+| 11/25 | Claude | Codexのパッチ `cowlog-ui-14dd25b.patch` の差し替え版（16:18、+843/−396）を適用。先に入れた旧版は `git diff` とフォルダの tar.gz を `~/Desktop/Cowlog-backups/cowlog-20261125-1622-*` に退避してから7ファイルを 14dd25b に戻し、`git apply --check` 成功後に適用。analyze 問題なし・test 52件成功・iOSシミュレータービルド成功。iPhone 16 Pro シミュレーター（18 Pro は別セッションが使用中）で、地図タブの航空写真上のナビ、ホームの新しい配置、牛の切り替え（0199→0204でリングが20%→22%）を切り替え後の状態で確認。ぼかしとレンズが浮く途中の動きは撮れておらず未確認。コミット・pushなし |
+| 11/25 | Codex | ホームの小さい活動率カードを削除。電池残量を最終計測の横に移し、残量に応じて塗りが変わる小さな電池と％にした。移動距離は歩行ピクトグラムがバー上を移動するカードへ変更。ナビのレンズが移動すると後ろ側が細く伸びるようにした。Flutter 3.44.9 で analyze・test 52件成功。スマホ幅のブラウザで表示と動きを確認。iOSシミュレーター・実機は未確認。コミット・pushなし |
+| 11/25 | Codex | ホームを開く・ホームに戻る・牛を切り替えるとき、活動・非活動の2本のリングを同時に描画。動画を参考に、タブ切り替え中は画面をぼかして重ね、ガラスのレンズはナビの縁から少し浮き上がって着地するよう調整。モーション軽減時は即時切り替え。Flutter 3.44.9 で analyze・test 51件成功。スマホ幅のブラウザでホームへ戻るときのぼかし・レンズと、牛を切り替えたときのリングを確認。iOSシミュレーターと実機は未確認。コミット・pushなし |
+| 11/25 | Codex | Hiiragi102/Cowlog の `14dd25b` を基準に、下部ナビのばね、連続タップ、ドラッグ中断、画面のフェードを調整。航空写真上ではガラスの白と文字のコントラストを上げた。拡大文字、モーション軽減、押下範囲を調整。Flutter 3.44.9 で analyze・test 48件成功。スマホ幅のブラウザでホーム→首輪・番号の動きと航空写真上の表示を確認。LinuxのためiOSシミュレーターのビルド・表示は未確認。コミット・pushなし |
 | 11/25 | Claude | 利用者の GitHub（Hiiragi102）に非公開リポジトリ `Hiiragi102/Cowlog` を作成し、Codex・Claude 共通の作業リポジトリに決定。`origin` を付け替え（旧 nanato0818/Cowlog は `nanato`）。11/9以降の未コミットの変更をまとめてコミットして `main` を push。`.claude/settings.local.json` を .gitignore に追加。push 前に鍵・トークンの混入がないか検索して問題なし |
 | 11/25 | Claude | Apple参考の続き（Codexで未完了だった分）。①押下の手応え `Pressable`（押すと縮み .snappy、離すと .bouncy で戻る）を一覧のカード・首輪カード・ピルに。②リキッドグラスのボタン `GlassButton`（押すとガラスが12%ふくらみ縁と表面が明るくなる、SwiftUI の `.glassEffect(.interactive())` 相当）を地図・経路全画面の丸ボタンに。`Glass` に `lift` を追加。③テーマの文字を Apple HIG の文字サイズ既定値（Large Title 34〜Caption 2 11、字間も）に。analyze・test 44件・シミュレーターでカード押下中の縮みを撮影して確認。ガラスボタン押下中の見た目は未撮影 |
 | 11/25 | Claude | ①淡い背景をやめて地を白に（`background`・ホーム上半分とも `#FFFFFF`、下地は無彩色 `#F2F2F4`）。ピル・検索欄は薄いグレーの塗り。②下部ナビのレンズを指で触れる・動かす間、透明なガラス玉になり下のアイコンと文字が最大1.3倍に拡大して見える（Flutter標準の `RawMagnifier`。影と縁の光・鏡面の反射は `_LensGloss` で上から描く）。③レンズの移動を SwiftUI の `.snappy`（応答0.4秒・減衰0.85）と同じばね `AppleSpring` に。離した勢いを引き継ぎ、勢い×0.18タブ分を先読みして着地。タブをまたぐたび触覚。④アイコンを Material から Cupertino（SF Symbols相当）へ置き換え。⑤カード見出しを15pt（Apple の Subheadline 相当）に。※途中で作った「画面が窓から広がる遷移」は利用者の意図と違ったため取り消し、画面切替は従来のフェード。analyze・test 44件・シミュレーターでドラッグ途中を撮影して確認。作業前バックアップ `~/Desktop/Cowlog-backups/cowlog-20261125-1414-before-lens-transition.tar.gz` |
@@ -76,12 +85,13 @@ flutter build ios --simulator --debug
 - 公開方法はREADMEに記載。外部公開は未実行、常設・API実データ公開時はホスティングと認証方式を決める
 
 ### 残っている課題
+- 11/27：Mac の「14dd25b ＋ v2」で統合パッチの適用を確認し、iPhone 18 Pro で通常版と `flutter run --dart-define=COWLOG_UI_REFRESH=true` の両方を起動する。スイッチと v2 のアニメーションを iOS 26 で確認する
 - 11/25：VS CodeのUnicode強調設定は変更済み。黄色い枠が残る場合はウインドウ再読み込み後に確認する
 - 地図の出典表示を削除したが、国土地理院の規約では出典の明示が必要。配布前に表示場所を決める
-- ナビのレンズの拡大は地図の上（航空写真）・実機での見え方と滑らかさが未確認。SF Pro Rounded（数字の丸い字体）は Flutter から指定できないため未使用
+- 11/25：ぼかし遷移、レンズの変形、活動リングと移動距離の再生はiOSシミュレーター・実機で未確認。特に航空写真の上でレンズの見え方と滑らかさを確認する。SF Pro Rounded（数字の丸い字体）は Flutter から指定できないため未使用
 - 11/20のカード化で、日付選択・番号編集シート・首輪追加・経路の全画面の見た目は未確認
-- 地図上ではガラスのナビの非選択タブの文字がやや読みにくい
-- 起動直後にナビをタップしたら詳細画面が開いたことが1回あった（再現せず）
+- 11/25：地図タブのナビは白の下地と濃い文字でコントラストを補強。実機の航空写真で読みやすさを確認する
+- 起動直後にナビをタップしたら詳細画面が開いたことが1回あった（再現せず）。今回、切り替え直後の薄い画面はタップを受けないようにした。実機で再発するかは未確認
 - 実機iPhone・Android・実データ（AWS・ローカルAPI）での確認は未実施
 - GPSデバッグサイトの実物の首輪USB接続、牧場でのスマホ現在地は未確認
 - 仕様書 `current-spec.md`・`ui-update-2026-11-09.md` の配色・ナビ・タブ構成は未更新

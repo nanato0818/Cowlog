@@ -15,8 +15,9 @@ import 'detail_screen.dart';
 
 /// ホーム：上半分は1頭ずつ横スワイプで切り替え、下半分はその牛の状態。
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.store});
+  const HomeScreen({super.key, required this.store, this.visit = 0});
   final AppStore store;
+  final int visit;
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -107,10 +108,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _content(BuildContext context) {
     final store = widget.store;
+    final refreshed = CowlogUi.isRefreshed(context);
     final cows = store.dashboard?.cows ?? const <Cow>[];
     if (cows.isEmpty) {
       return Material(
-        color: AppColors.background,
+        color: refreshed ? AppColors.refreshCanvas : AppColors.background,
         child: Center(
           child: store.isLoading
               ? const CircularProgressIndicator()
@@ -130,10 +132,21 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     final height = MediaQuery.sizeOf(context).height;
     final top = MediaQuery.paddingOf(context).top;
-    final stageHeight = (height * .46).clamp(320.0, 460.0);
+    final stageHeight = refreshed
+        ? (height * .43).clamp(top + 224, top + 420)
+        : (height * .46).clamp(320.0, 460.0);
     final notice = store.isOffline ? 'オフライン' : store.errorMessage;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final details = FilledButton(
+      style: FilledButton.styleFrom(
+        backgroundColor: AppColors.accent,
+        foregroundColor: AppColors.onInk,
+      ),
+      onPressed: () => _open(cow),
+      child: const Text('詳細を見る'),
+    );
     return Material(
-      color: AppColors.background,
+      color: refreshed ? AppColors.refreshCanvas : AppColors.background,
       child: Stack(
         children: [
           // 上半分：横スワイプで個体を切り替える。
@@ -143,13 +156,21 @@ class _HomeScreenState extends State<HomeScreen> {
             top: 0,
             height: stageHeight,
             child: DecoratedBox(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [AppColors.stageTop, AppColors.stageBottom],
-                ),
-              ),
+              decoration: refreshed
+                  ? const BoxDecoration(
+                      gradient: RadialGradient(
+                        center: Alignment(0, -.12),
+                        radius: .9,
+                        colors: [AppColors.surface, AppColors.refreshStageEdge],
+                      ),
+                    )
+                  : const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [AppColors.stageTop, AppColors.stageBottom],
+                      ),
+                    ),
               child: PageView.builder(
                 key: const ValueKey('home-pages'),
                 controller: _pages,
@@ -159,12 +180,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   setState(() => _index = i);
                 },
                 itemBuilder: (context, i) {
-                  final offset = (i - _page).clamp(-1.0, 1.0);
+                  final offset = refreshed && reduceMotion
+                      ? 0.0
+                      : (i - _page).clamp(-1.0, 1.0);
                   return GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTap: () => _open(cows[i]),
                     child: Padding(
-                      padding: EdgeInsets.fromLTRB(24, top + 70, 24, 46),
+                      padding: refreshed
+                          ? EdgeInsets.fromLTRB(20, top + 58, 20, 56)
+                          : EdgeInsets.fromLTRB(24, top + 70, 24, 46),
                       child: Opacity(
                         opacity: 1 - offset.abs() * .5,
                         child: Transform.translate(
@@ -193,7 +218,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   Expanded(
                     child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 220),
+                      duration: refreshed && reduceMotion
+                          ? Duration.zero
+                          : const Duration(milliseconds: 220),
                       layoutBuilder: (current, previous) => Stack(
                         alignment: Alignment.centerLeft,
                         children: [...previous, ?current],
@@ -203,8 +230,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         key: ValueKey(cow.id),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 38,
+                        style: TextStyle(
+                          fontSize: refreshed ? 44 : 38,
                           fontWeight: FontWeight.w800,
                           letterSpacing: -1,
                           fontFeatures: tabularFigures,
@@ -243,32 +270,44 @@ class _HomeScreenState extends State<HomeScreen> {
           Positioned.fill(
             top: stageHeight - 26,
             child: Container(
-              decoration: const BoxDecoration(
-                color: AppColors.background,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+              decoration: BoxDecoration(
+                color: refreshed
+                    ? AppColors.refreshCanvas
+                    : AppColors.background,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(32),
+                ),
                 boxShadow: AppColors.cardShadow,
               ),
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(14, 14, 14, 130),
+                padding: EdgeInsets.fromLTRB(
+                  refreshed ? 18 : 14,
+                  14,
+                  refreshed ? 18 : 14,
+                  130,
+                ),
                 children: [
-                  _StatRow(
+                  _MeasurementInfo(
                     cow: cow,
-                    today: _summaries[dayKey(farmToday())],
-                    yesterday:
-                        _summaries[dayKey(
-                          farmToday().subtract(const Duration(days: 1)),
-                        )],
-                    distanceKm: _distanceKm,
-                    loading: _loading,
+                    loading: _loading || _cowId != cow.id,
                   ),
-                  const SizedBox(height: 10),
+                  SizedBox(height: refreshed ? 14 : 10),
                   LiveCard(
                     icon: CupertinoIcons.chart_pie_fill,
                     title: '今日の活動バランス',
                     child: ActivityRings(
-                      summary: _summaries[dayKey(farmToday())],
+                      summary: _cowId == cow.id
+                          ? _summaries[dayKey(farmToday())]
+                          : null,
+                      revealKey: (widget.visit, cow.id),
                     ),
                   ),
+                  const SizedBox(height: 10),
+                  _DistanceCard(
+                    key: ValueKey(cow.id),
+                    distanceKm: _cowId == cow.id ? _distanceKm : null,
+                  ),
+                  if (refreshed) ...[const SizedBox(height: 12), details],
                   const SizedBox(height: 10),
                   LiveCard(
                     icon: CupertinoIcons.chart_bar_alt_fill,
@@ -280,15 +319,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       onSelect: (_) => _open(cow),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.accent,
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: () => _open(cow),
-                    child: const Text('詳細を見る'),
-                  ),
+                  if (!refreshed) ...[const SizedBox(height: 16), details],
                 ],
               ),
             ),
@@ -299,184 +330,210 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _StatRow extends StatelessWidget {
-  const _StatRow({
-    required this.cow,
-    required this.today,
-    required this.yesterday,
-    required this.distanceKm,
-    required this.loading,
-  });
+class _MeasurementInfo extends StatelessWidget {
+  const _MeasurementInfo({required this.cow, required this.loading});
+
   final Cow cow;
-  final DailyActivity? today, yesterday;
-  final double? distanceKm;
   final bool loading;
+
   @override
   Widget build(BuildContext context) {
-    final battery = cow.batteryPercent;
-    final active = today?.activityRatio;
-    final before = yesterday?.activityRatio;
     final measured = cow.latestMeasuredAt;
+    final battery = cow.batteryPercent;
+    final low = battery != null && battery <= 30;
+    final batteryColor = low ? AppColors.accentDark : AppColors.muted;
+    final batteryLabel = battery == null ? '—' : '$battery%';
+    const infoStyle = TextStyle(
+      fontSize: 13,
+      color: AppColors.muted,
+      fontFeatures: tabularFigures,
+    );
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: _Stat(
-                icon: CupertinoIcons.battery_75_percent,
-                label: '電池',
-                gaugeColor: AppColors.gaugeBattery,
-                value: battery?.toString(),
-                unit: '%',
-                ratio: battery == null ? null : battery / 100,
-                low: battery != null && battery <= 30,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _Stat(
-                icon: CupertinoIcons.waveform_path_ecg,
-                label: '活動率',
-                gaugeColor: AppColors.gaugeActivity,
-                value: active == null ? null : '${(active * 100).round()}',
-                unit: '%',
-                ratio: active,
-                foot: before == null ? null : '昨日 ${(before * 100).round()}%',
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _Stat(
-                icon: CupertinoIcons.location_solid,
-                label: '移動距離',
-                gaugeColor: AppColors.gaugeDistance,
-                value: distanceKm?.toStringAsFixed(1),
-                unit: 'km',
-                ratio: distanceKm == null
-                    ? null
-                    : (distanceKm! / 4).clamp(0.0, 1.0),
-                foot: '今日',
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6),
-          child: Text(
-            measured == null ? '未受信' : '最終計測 ${dateTimeLabel(measured)}',
-            style: const TextStyle(
-              fontSize: 13,
-              color: AppColors.muted,
-              fontFeatures: tabularFigures,
-            ),
+          child: Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 12,
+            runSpacing: 6,
+            children: [
+              Text(
+                measured == null ? '未受信' : '最終計測 ${dateTimeLabel(measured)}',
+                style: infoStyle,
+              ),
+              Semantics(
+                label: battery == null ? '電池残量 不明' : '電池残量 $batteryLabel',
+                excludeSemantics: true,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _BatteryIcon(percent: battery, color: batteryColor),
+                    const SizedBox(width: 5),
+                    Text(
+                      batteryLabel,
+                      style: infoStyle.copyWith(
+                        color: batteryColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
         if (loading)
           const Padding(
             padding: EdgeInsets.only(top: 8),
-            child: LinearProgressIndicator(minHeight: 2),
+            child: LinearProgressIndicator(
+              minHeight: 2,
+              semanticsLabel: '活動データ読み込み中',
+            ),
           ),
       ],
     );
   }
 }
 
-class _Stat extends StatelessWidget {
-  const _Stat({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.unit,
-    required this.ratio,
-    required this.gaugeColor,
-    this.foot,
-    this.low = false,
-  });
-  final IconData icon;
-  final String label;
-  final String? value;
-  final String unit;
-  final double? ratio;
-  final Color gaugeColor;
-  final String? foot;
-  final bool low;
+class _BatteryIcon extends StatelessWidget {
+  const _BatteryIcon({required this.percent, required this.color});
+
+  final int? percent;
+  final Color color;
+
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-    decoration: BoxDecoration(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(26),
-      boxShadow: AppColors.cardShadow,
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, size: 16, color: gaugeColor),
-            const SizedBox(width: 5),
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.muted,
+  Widget build(BuildContext context) {
+    final fill = ((percent ?? 0) / 100).clamp(0.0, 1.0);
+    return SizedBox(
+      width: 22,
+      height: 12,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            right: 3,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border.all(color: color),
+                borderRadius: BorderRadius.circular(3),
+              ),
+            ),
+          ),
+          if (fill > 0)
+            Positioned(
+              left: 2,
+              top: 2,
+              bottom: 2,
+              width: 15 * fill,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(1),
                 ),
               ),
             ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text.rich(
-            TextSpan(
-              children: [
-                TextSpan(
-                  text: value ?? '—',
-                  style: TextStyle(
-                    fontSize: 30,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: -.8,
-                    color: low ? AppColors.accent : AppColors.ink,
-                  ),
-                ),
-                if (value != null)
-                  TextSpan(
-                    text: unit,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: low ? AppColors.accent : AppColors.muted,
-                    ),
-                  ),
-              ],
+          Positioned(
+            right: 0,
+            top: 4,
+            bottom: 4,
+            width: 2,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(1),
+              ),
             ),
-            style: const TextStyle(fontFeatures: tabularFigures),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DistanceCard extends StatelessWidget {
+  const _DistanceCard({super.key, required this.distanceKm});
+
+  final double? distanceKm;
+
+  @override
+  Widget build(BuildContext context) {
+    final distance = distanceKm;
+    final target = distance == null ? 0.0 : (distance / 4).clamp(0.0, 1.0);
+    final reduced = MediaQuery.disableAnimationsOf(context);
+    return LiveCard(
+      title: '今日の移動距離',
+      trailing: Text(
+        distance == null ? '—' : '${distance.toStringAsFixed(1)} km',
+        style: const TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+          fontFeatures: tabularFigures,
+          color: AppColors.ink,
+        ),
+      ),
+      child: ExcludeSemantics(
+        child: SizedBox(
+          height: 34,
+          child: LayoutBuilder(
+            builder: (context, box) {
+              const markerSize = 24.0;
+              final trackWidth = (box.maxWidth - markerSize).clamp(
+                0.0,
+                box.maxWidth,
+              );
+              return TweenAnimationBuilder<double>(
+                tween: Tween(begin: reduced ? target : 0, end: target),
+                duration: reduced
+                    ? Duration.zero
+                    : const Duration(milliseconds: 520),
+                curve: Curves.easeOutCubic,
+                builder: (context, progress, _) => Stack(
+                  children: [
+                    Positioned(
+                      left: markerSize / 2,
+                      right: markerSize / 2,
+                      bottom: 2,
+                      height: 5,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: AppColors.ringTrack,
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                      ),
+                    ),
+                    if (distance != null) ...[
+                      Positioned(
+                        left: markerSize / 2,
+                        bottom: 2,
+                        width: trackWidth * progress,
+                        height: 5,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: AppColors.accent,
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: trackWidth * progress,
+                        top: 1,
+                        child: const Icon(
+                          Icons.directions_walk_rounded,
+                          size: markerSize,
+                          color: AppColors.accent,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            },
           ),
         ),
-        const SizedBox(height: 10),
-        SegmentGauge(ratio: ratio, segments: 8, color: gaugeColor),
-        const SizedBox(height: 8),
-        Text(
-          foot ?? ' ',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontSize: 12,
-            color: AppColors.muted,
-            fontFeatures: tabularFigures,
-          ),
-        ),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 }
 
 class _PageDots extends StatelessWidget {

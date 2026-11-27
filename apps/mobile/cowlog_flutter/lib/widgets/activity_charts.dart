@@ -7,8 +7,11 @@ const _ringColors = [AppColors.ringActive, AppColors.ringInactive];
 const _ringLabels = ['活動', '非活動'];
 
 class ActivityRings extends StatelessWidget {
-  const ActivityRings({super.key, required this.summary});
+  const ActivityRings({super.key, required this.summary, this.revealKey});
   final DailyActivity? summary;
+
+  /// A new value replays the sweep from empty rings.
+  final Object? revealKey;
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
@@ -17,6 +20,9 @@ class ActivityRings extends StatelessWidget {
           ? <double>[]
           : [summary!.activeSeconds, summary!.inactiveSeconds];
       final ratio = summary?.activityRatio;
+      final fractions = summary?.fractions ?? const [0.0, 0.0];
+      final target = Offset(fractions[0], fractions[1]);
+      Widget rings(Offset sweep) => CustomPaint(painter: _RingPainter(sweep));
       return Semantics(
         label: summary == null || summary!.coveredSeconds == 0
             ? '行動量未取得'
@@ -33,21 +39,18 @@ class ActivityRings extends StatelessWidget {
                 alignment: Alignment.center,
                 children: [
                   Positioned.fill(
-                    child: TweenAnimationBuilder<double>(
-                      tween: Tween(end: (summary?.fractions ?? [0, 0])[0]),
-                      duration: MediaQuery.disableAnimationsOf(context)
-                          ? Duration.zero
-                          : const Duration(milliseconds: 520),
-                      curve: Curves.easeOutCubic,
-                      builder: (context, active, _) => CustomPaint(
-                        painter: _RingPainter([
-                          active,
-                          summary == null || summary!.coveredSeconds == 0
-                              ? 0
-                              : 1 - active,
-                        ]),
-                      ),
-                    ),
+                    child: MediaQuery.disableAnimationsOf(context)
+                        ? rings(target)
+                        : TweenAnimationBuilder<Offset>(
+                            key: ValueKey(revealKey),
+                            tween: Tween(
+                              begin: revealKey == null ? target : Offset.zero,
+                              end: target,
+                            ),
+                            duration: const Duration(milliseconds: 520),
+                            curve: Curves.easeOutCubic,
+                            builder: (context, sweep, _) => rings(sweep),
+                          ),
                   ),
                   Column(
                     mainAxisSize: MainAxisSize.min,
@@ -128,7 +131,7 @@ class ActivityRings extends StatelessWidget {
 
 class _RingPainter extends CustomPainter {
   const _RingPainter(this.fractions);
-  final List<double> fractions;
+  final Offset fractions;
   @override
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
@@ -142,7 +145,7 @@ class _RingPainter extends CustomPainter {
         ..strokeWidth = stroke
         ..strokeCap = StrokeCap.round;
       canvas.drawCircle(center, radius, paint..color = AppColors.ringTrack);
-      final f = fractions[i].clamp(0.0, 1.0);
+      final f = (i == 0 ? fractions.dx : fractions.dy).clamp(0.0, 1.0);
       if (f > 0) {
         paint.color = _ringColors[i];
         if (f >= .9999) {
@@ -155,8 +158,7 @@ class _RingPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_RingPainter old) =>
-      old.fractions[0] != fractions[0] || old.fractions[1] != fractions[1];
+  bool shouldRepaint(_RingPainter old) => old.fractions != fractions;
 }
 
 class DailyActivityBars extends StatelessWidget {

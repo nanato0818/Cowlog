@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
@@ -33,6 +34,7 @@ class _RootScreenState extends State<RootScreen>
   static const _count = 4;
 
   var _index = 0;
+  var _homeVisit = 0;
   var _previous = 0;
   final _visited = <int>{0};
   Timer? _refreshTimer;
@@ -58,8 +60,8 @@ class _RootScreenState extends State<RootScreen>
     duration: const Duration(milliseconds: 65),
     reverseDuration: const Duration(milliseconds: 320),
   );
-  double _lensFrom = 0;
   bool _dragging = false;
+  double _dragDirection = 0;
   int? _pressed;
 
   /// ドラッグ中に最後に通過したタブ（またぐたびに触覚を返す）。
@@ -105,39 +107,49 @@ class _RootScreenState extends State<RootScreen>
   }
 
   void _pressDown(int? i) {
-    setState(() => _pressed = i);
+    if (MediaQuery.disableAnimationsOf(context)) return;
+    if (i != _pressed) setState(() => _pressed = i);
     _press.forward();
   }
 
-  void _pressUp() {
-    if (_pressed != null) setState(() => _pressed = null);
-    _press.reverse();
+  void _pressUp() => _press.reverse();
+
+  void _finishDrag({double? velocity}) {
+    if (!_dragging) return;
+    _dragging = false;
+    _pressUp();
+    // 勢いを少し先読みする。キャンセルされた操作は元のタブへ戻す。
+    final target = velocity == null
+        ? _index
+        : (_lens.value + velocity * .18).round().clamp(0, _count - 1);
+    _select(target, velocity: velocity ?? 0);
   }
 
-  void _select(int i, {bool fromDrag = false, double velocity = 0}) {
+  void _select(int i, {double? velocity}) {
     final reduced = MediaQuery.disableAnimationsOf(context);
-    _lensFrom = _lens.value;
     if (reduced) {
       _lens.value = i.toDouble();
     } else {
-      // SwiftUI の .snappy と同じばね。指を離した勢いはそのまま引き継ぐ。
+      // 連続タップでも、レンズの現在位置と速度から動きをつなぐ。
       _lens.animateWith(
         SpringSimulation(
           AppleSpring.snappy,
           _lens.value,
           i.toDouble(),
-          velocity,
+          (velocity ?? _lens.velocity).clamp(-14.0, 14.0),
         ),
       );
     }
     if (i == _index) return;
-    HapticFeedback.selectionClick();
+    if (velocity == null || _crossed != i) HapticFeedback.selectionClick();
     setState(() {
-      _previous = _index;
+      // 切り替えを早い段階で取り消したときは、まだ見えている画面を残す。
+      if (!_switch.isAnimating || _fade >= .5) _previous = _index;
       _index = i;
+      if (i == 0) _homeVisit++;
       _visited.add(i);
     });
-    if (reduced) {
+    if (reduced || _previous == _index) {
       _switch.value = 1;
     } else {
       _switch.forward(from: 0);
@@ -145,59 +157,93 @@ class _RootScreenState extends State<RootScreen>
   }
 
   Widget _screen(int i) => switch (i) {
-    0 => HomeScreen(store: widget.store),
+    0 => HomeScreen(store: widget.store, visit: _homeVisit),
     1 => DashboardScreen(store: widget.store),
     2 => MapScreen(store: widget.store),
     _ => HerdScreen(store: widget.store, active: _index == 3),
   };
 
+  double get _fade => Curves.easeOutCubic.transform(_switch.value);
+
   Widget _body(BuildContext context) {
-    final t = Curves.easeOutCubic.transform(_switch.value);
-    final moving = _switch.isAnimating;
+    final reduced = MediaQuery.disableAnimationsOf(context);
     return Stack(
       fit: StackFit.expand,
       children: [
-        for (var i = 0; i < _count; i++)
-          if (_visited.contains(i))
-            Offstage(
-              key: ValueKey('tab-$i'),
-              offstage: i != _index && !(moving && i == _previous),
-              child: TickerMode(
-                enabled: i == _index,
-                child: IgnorePointer(
-                  ignoring: i != _index,
-                  child: Opacity(
-                    opacity: i == _index ? t : 1 - t,
-                    child: Transform.scale(
-                      scale: i == _index ? 1.015 - .015 * t : 1 - .02 * t,
-                      child: _screen(i),
+        for (final i in [..._visited.where((i) => i != _index), _index])
+          AnimatedBuilder(
+            key: ValueKey(i),
+            animation: _switch,
+            child: TickerMode(enabled: i == _index, child: _screen(i)),
+            builder: (context, child) {
+              final moving = !reduced && _switch.isAnimating;
+              final fade = moving ? _fade : 1.0;
+              final inactive = i != _index;
+              final leaving = moving && i == _previous;
+              final blocked = inactive || fade < .5;
+              final blur = leaving
+                  ? 9.0 * fade
+                  : inactive
+                  ? 0.0
+                  : 9.0 * (1 - fade);
+              return Offstage(
+                key: ValueKey('tab-$i'),
+                offstage: inactive && !leaving,
+                child: ExcludeFocus(
+                  excluding: blocked,
+                  child: ExcludeSemantics(
+                    excluding: blocked,
+                    child: IgnorePointer(
+                      ignoring: blocked,
+                      child: Opacity(
+                        opacity: inactive ? 1 : fade,
+                        child: ImageFiltered(
+                          enabled: blur > .1,
+                          imageFilter: ImageFilter.blur(
+                            sigmaX: blur,
+                            sigmaY: blur,
+                          ),
+                          child: child,
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ),
+              );
+            },
+          ),
       ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final refreshed = CowlogUi.isRefreshed(context);
+    final labels = refreshed ? const ['ホーム', '優先一覧', '地図', '設定'] : _labels;
+    final reduced = MediaQuery.disableAnimationsOf(context);
+    final highContrast = MediaQuery.highContrastOf(context);
+    final labelSize = refreshed ? 12.0 : 11.0;
+    final navHeight = math.max(
+      66.0,
+      38 + 2.2 * MediaQuery.textScalerOf(context).scale(labelSize),
+    );
+    final onMap = _index == 2;
     return Scaffold(
       extendBody: true,
-      body: AnimatedBuilder(
-        animation: _switch,
-        builder: (context, _) => _body(context),
-      ),
+      body: _body(context),
       bottomNavigationBar: SafeArea(
         top: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(18, 4, 18, 10),
           child: SizedBox(
             key: const ValueKey('app-navigation'),
-            height: 66,
+            height: navHeight,
             child: Glass(
-              radius: 33,
+              radius: navHeight / 2,
+              backingOpacity: highContrast ? .85 : (onMap ? .62 : 0),
+              tinted: refreshed,
               padding: const EdgeInsets.all(5),
+              clipContent: false,
               child: LayoutBuilder(
                 builder: (context, box) {
                   final segment = box.maxWidth / _count;
@@ -206,9 +252,14 @@ class _RootScreenState extends State<RootScreen>
                   return Listener(
                     onPointerDown: (d) => _pressDown(at(d.localPosition.dx)),
                     onPointerUp: (_) => _pressUp(),
-                    onPointerCancel: (_) => _pressUp(),
+                    onPointerCancel: (_) {
+                      // 認識済みのドラッグは、PointerCancel でも onEnd が呼ばれる。
+                      _finishDrag();
+                      _pressUp();
+                    },
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
+                      excludeFromSemantics: true,
                       onTapUp: (d) {
                         _pressUp();
                         _select(at(d.localPosition.dx));
@@ -217,10 +268,12 @@ class _RootScreenState extends State<RootScreen>
                       onHorizontalDragStart: (_) {
                         _lens.stop();
                         _dragging = true;
+                        _dragDirection = 0;
                         _crossed = _lens.value.round();
                         _pressDown(null);
                       },
                       onHorizontalDragUpdate: (d) {
+                        _dragDirection = d.delta.dx.sign;
                         final v = (_lens.value + d.delta.dx / segment).clamp(
                           0.0,
                           _count - 1.0,
@@ -232,54 +285,72 @@ class _RootScreenState extends State<RootScreen>
                         }
                         _lens.value = v;
                       },
-                      onHorizontalDragEnd: (d) {
-                        _dragging = false;
-                        _pressUp();
-                        // 勢いを考慮して着地先を決める（軽く払っても次へ進む）。
-                        final speed = d.velocity.pixelsPerSecond.dx / segment;
-                        final target = (_lens.value + speed * .18)
-                            .round()
-                            .clamp(0, _count - 1);
-                        _select(target, fromDrag: true, velocity: speed);
-                      },
+                      onHorizontalDragEnd: (d) => _finishDrag(
+                        velocity: d.velocity.pixelsPerSecond.dx / segment,
+                      ),
+                      onHorizontalDragCancel: _finishDrag,
                       child: AnimatedBuilder(
                         animation: Listenable.merge([_lens, _press]),
                         builder: (context, _) {
-                          // 移動中と指が触れている間は、レンズが少し膨らむ。
-                          final target = _index.toDouble();
-                          final span = (target - _lensFrom).abs();
-                          final progress = span == 0 || _dragging
-                              ? 1.0
-                              : ((_lens.value - _lensFrom).abs() / span).clamp(
-                                  0.0,
-                                  1.0,
-                                );
-                          final travel = _dragging
-                              ? 1.0
-                              : _lens.isAnimating
-                              ? math.sin(math.pi * progress)
-                              : 0.0;
-                          final swell = math.max(
-                            travel,
-                            Curves.easeOut.transform(_press.value),
-                          );
-                          final stretch = travel * math.min(span, 1) * .14;
-                          final scale = 1 + .20 * swell;
+                          final velocity = _lens.velocity;
+                          final direction = _dragging
+                              ? _dragDirection
+                              : velocity.sign;
+                          final speed = velocity.abs();
+                          final travel = reduced
+                              ? 0.0
+                              : _dragging
+                              ? .9
+                              : (speed / 9).clamp(0.0, 1.0);
+                          final press = reduced
+                              ? 0.0
+                              : Curves.easeOut.transform(_press.value);
+                          final swell = math.max(travel, press);
+                          final lensHeight = box.maxHeight * (1 + .27 * swell);
+                          final lensWidth =
+                              segment * (1 + .20 * swell + .14 * travel);
+                          final lensLeft =
+                              ((_lens.value + .5) * segment - lensWidth / 2)
+                                  .clamp(-4.0, box.maxWidth + 4 - lensWidth);
+                          final lensTop = (box.maxHeight - lensHeight) / 2;
+                          final radius = lensHeight / 2;
                           final nearest = _lens.value.round();
+                          final lensRight = lensLeft + lensWidth;
+                          final tailLength = math.min(
+                            segment * .32 * travel,
+                            direction > 0
+                                ? math.max(0.0, lensLeft + 4)
+                                : math.max(0.0, box.maxWidth + 4 - lensRight),
+                          );
+                          final overlap = radius * .75;
                           return Stack(
                             clipBehavior: Clip.none,
                             children: [
-                              Positioned(
-                                left:
-                                    _lens.value * segment -
-                                    segment * stretch / 2,
-                                top: 0,
-                                bottom: 0,
-                                width: segment * (1 + stretch),
-                                child: Transform.scale(
-                                  scale: scale,
-                                  child: _Lens(lift: swell),
+                              if (direction != 0 && tailLength > 1)
+                                Positioned(
+                                  left: direction > 0
+                                      ? lensLeft - tailLength
+                                      : lensRight - overlap,
+                                  top: lensTop,
+                                  width: tailLength + overlap,
+                                  height: lensHeight,
+                                  child: IgnorePointer(
+                                    child: CustomPaint(
+                                      key: const ValueKey('lens-trail'),
+                                      painter: _LensTrail(
+                                        mirrored: direction < 0,
+                                        lift: travel,
+                                        overlap: overlap,
+                                      ),
+                                    ),
+                                  ),
                                 ),
+                              Positioned(
+                                left: lensLeft,
+                                top: lensTop,
+                                width: lensWidth,
+                                height: lensHeight,
+                                child: _Lens(radius: radius, lift: swell),
                               ),
                               Row(
                                 children: [
@@ -288,15 +359,21 @@ class _RootScreenState extends State<RootScreen>
                                       child: Semantics(
                                         button: true,
                                         selected: _index == i,
-                                        label: _labels[i],
+                                        label: labels[i],
+                                        onTap: () => _select(i),
                                         excludeSemantics: true,
                                         child: _TabItem(
-                                          icon: _icons[i],
-                                          label: _labels[i],
+                                          icon: refreshed && i == 3
+                                              ? CupertinoIcons.gear_alt
+                                              : _icons[i],
+                                          label: labels[i],
                                           active: nearest == i,
-                                          pressed: _pressed == i
-                                              ? _press.value
-                                              : 0,
+                                          strongContrast:
+                                              refreshed ||
+                                              onMap ||
+                                              highContrast,
+                                          labelSize: labelSize,
+                                          pressed: _pressed == i ? press : 0,
                                         ),
                                       ),
                                     ),
@@ -307,32 +384,24 @@ class _RootScreenState extends State<RootScreen>
                               // 見える（Liquid Glass のレンズ効果）。
                               if (swell > .02)
                                 Positioned(
-                                  left:
-                                      _lens.value * segment +
-                                      segment / 2 -
-                                      segment * (1 + stretch) * scale / 2,
-                                  top:
-                                      box.maxHeight / 2 -
-                                      box.maxHeight * scale / 2,
-                                  width: segment * (1 + stretch) * scale,
-                                  height: box.maxHeight * scale,
+                                  left: lensLeft,
+                                  top: lensTop,
+                                  width: lensWidth,
+                                  height: lensHeight,
                                   child: IgnorePointer(
                                     child: CustomPaint(
                                       foregroundPainter: _LensGloss(
-                                        radius: 28 * scale,
+                                        radius: radius,
                                         lift: swell,
                                       ),
                                       child: RawMagnifier(
-                                        size: Size(
-                                          segment * (1 + stretch) * scale,
-                                          box.maxHeight * scale,
-                                        ),
+                                        size: Size(lensWidth, lensHeight),
                                         magnificationScale: 1 + .3 * swell,
                                         decoration: MagnifierDecoration(
                                           opacity: swell.clamp(0.0, 1.0),
                                           shape: RoundedRectangleBorder(
                                             borderRadius: BorderRadius.circular(
-                                              28 * scale,
+                                              radius,
                                             ),
                                           ),
                                         ),
@@ -361,15 +430,23 @@ class _TabItem extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.active,
+    required this.strongContrast,
+    required this.labelSize,
     required this.pressed,
   });
   final IconData icon;
   final String label;
   final bool active;
+  final bool strongContrast;
+  final double labelSize;
   final double pressed;
   @override
   Widget build(BuildContext context) {
-    final color = active ? AppColors.accent : AppColors.muted;
+    final color = active
+        ? (strongContrast ? AppColors.accentDark : AppColors.accent)
+        : strongContrast
+        ? AppColors.ink
+        : AppColors.muted;
     return Transform.scale(
       scale: 1 + .08 * pressed,
       child: Column(
@@ -379,11 +456,12 @@ class _TabItem extends StatelessWidget {
           const SizedBox(height: 3),
           Text(
             label,
-            maxLines: 1,
-            overflow: TextOverflow.visible,
-            softWrap: false,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 11,
+              fontSize: labelSize,
+              height: 1.1,
               fontWeight: active ? FontWeight.w700 : FontWeight.w500,
               color: color,
             ),
@@ -397,52 +475,133 @@ class _TabItem extends StatelessWidget {
 /// 選択中のタブに重なる、透き通ったガラスのレンズ。
 /// [lift] が大きいほど（移動中・押下中）縁の光と影が強くなる。
 class _Lens extends StatelessWidget {
-  const _Lens({required this.lift});
+  const _Lens({required this.radius, required this.lift});
+  final double radius;
   final double lift;
   @override
-  Widget build(BuildContext context) => DecoratedBox(
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(28),
-      gradient: LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [
-          // 持ち上げている間は透明なガラスに近づく。
-          Colors.white.withValues(alpha: .18 - .10 * lift),
-          Colors.white.withValues(alpha: .04),
+  Widget build(BuildContext context) {
+    final refreshed = CowlogUi.isRefreshed(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(radius),
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            // 持ち上げている間は透明なガラスに近づく。
+            Color.lerp(
+              refreshed
+                  ? AppColors.accentSoft
+                  : AppColors.surface.withValues(alpha: .18),
+              AppColors.surface.withValues(alpha: .08),
+              lift,
+            )!,
+            Color.lerp(
+              refreshed
+                  ? AppColors.surface
+                  : AppColors.surface.withValues(alpha: .04),
+              AppColors.surface.withValues(alpha: .04),
+              lift,
+            )!,
+          ],
+        ),
+        border: Border.all(
+          color: AppColors.ink.withValues(alpha: .14 + .08 * lift),
+          width: 1 + .4 * lift,
+        ),
+        boxShadow: [
+          BoxShadow(
+            // 持ち上げている間の影はガラス玉の外側に描く（拡大で灰色にならないよう）。
+            color: AppColors.ink.withValues(
+              alpha: .10 * (1 - lift) * (1 - lift),
+            ),
+            blurRadius: 10 + 14 * lift,
+            offset: Offset(0, 2 + 4 * lift),
+          ),
         ],
       ),
-      border: Border.all(
-        color: AppColors.ink.withValues(alpha: .14 + .08 * lift),
-        width: 1 + .4 * lift,
-      ),
-      boxShadow: [
-        BoxShadow(
-          // 持ち上げている間の影はガラス玉の外側に描く（拡大で灰色にならないよう）。
-          color: AppColors.ink.withValues(alpha: .10 * (1 - lift) * (1 - lift)),
-          blurRadius: 10 + 14 * lift,
-          offset: Offset(0, 2 + 4 * lift),
-        ),
-      ],
-    ),
-    child: CustomPaint(
-      foregroundPainter: GlassRim(radius: 28, lift: lift),
-      child: Align(
-        alignment: Alignment.topCenter,
-        child: FractionallySizedBox(
-          widthFactor: .64,
-          child: Container(
-            height: 1.2,
-            margin: const EdgeInsets.only(top: 1.5),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(1),
+      child: CustomPaint(
+        foregroundPainter: GlassRim(radius: radius, lift: lift),
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: FractionallySizedBox(
+            widthFactor: .64,
+            child: Container(
+              height: 1.2,
+              margin: const EdgeInsets.only(top: 1.5),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(1),
+              ),
             ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
+}
+
+/// Slower edges stretch and taper toward the tab the lens is leaving.
+class _LensTrail extends CustomPainter {
+  const _LensTrail({
+    required this.mirrored,
+    required this.lift,
+    required this.overlap,
+  });
+
+  final bool mirrored;
+  final double lift;
+  final double overlap;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final neck = w - overlap;
+    final path = Path()
+      ..moveTo(0, h * .5)
+      ..cubicTo(neck * .5, h * .38, neck * .8, h * .48, w, h * .09)
+      ..lineTo(w, h * .91)
+      ..cubicTo(neck * .8, h * .52, neck * .5, h * .62, 0, h * .5)
+      ..close();
+    final bounds = Offset.zero & size;
+    canvas.save();
+    if (mirrored) {
+      canvas.translate(w, 0);
+      canvas.scale(-1, 1);
+    }
+    canvas.drawPath(
+      path,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withValues(alpha: .6 * lift),
+            Colors.white.withValues(alpha: .30 * lift),
+            Colors.white.withValues(alpha: 0),
+          ],
+        ).createShader(bounds),
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = .8
+        ..shader = LinearGradient(
+          colors: [
+            AppColors.ink.withValues(alpha: .16 * lift),
+            Colors.white.withValues(alpha: .8 * lift),
+            Colors.white.withValues(alpha: 0),
+          ],
+        ).createShader(bounds),
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_LensTrail old) =>
+      old.mirrored != mirrored || old.lift != lift || old.overlap != overlap;
 }
 
 /// 持ち上げたガラス玉の表面：縁の光、上部の鏡面の反射、下側のわずかな影の縁。
@@ -469,9 +628,9 @@ class _LensGloss extends CustomPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Colors.white.withValues(alpha: .22 * lift),
+            Colors.white.withValues(alpha: .15 * lift),
             Colors.white.withValues(alpha: 0),
-            Colors.white.withValues(alpha: .10 * lift),
+            Colors.white.withValues(alpha: .08 * lift),
           ],
           stops: const [0, .45, 1],
         ).createShader(rect),
@@ -490,7 +649,7 @@ class _LensGloss extends CustomPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Colors.white.withValues(alpha: .55 * lift),
+            Colors.white.withValues(alpha: .44 * lift),
             Colors.white.withValues(alpha: 0),
           ],
         ).createShader(gloss),
